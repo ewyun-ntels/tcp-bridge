@@ -1,6 +1,7 @@
 package metrics
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -16,41 +17,43 @@ import (
 type Metrics struct {
 	logger *slog.Logger
 	config *config.MetricsConfig
-	
+
 	// Connection metrics
 	connectionState *prometheus.GaugeVec
 	connectionCount prometheus.Counter
-	
+
 	// TCP metrics
-	tcpFramesSent     *prometheus.CounterVec
-	tcpFramesReceived *prometheus.CounterVec
+	tcpFramesSent       *prometheus.CounterVec
+	tcpFramesReceived   *prometheus.CounterVec
 	tcpBytesTransmitted *prometheus.CounterVec
-	
+
 	// NATS metrics
 	natsMessagesProcessed *prometheus.CounterVec
 	natsRequestDuration   *prometheus.HistogramVec
-	
+
 	// Queue metrics
 	sendQueueSize         prometheus.Gauge
 	sendQueueUtilization  prometheus.Gauge
 	sendQueueEnqueueTotal prometheus.Counter
 	sendQueueDropTotal    prometheus.Counter
-	
+
 	// Semaphore metrics
-	semaphoreUtilization *prometheus.GaugeVec
+	semaphoreUtilization  *prometheus.GaugeVec
 	semaphoreAcquireTotal *prometheus.CounterVec
-	
+
 	// Inflight metrics
-	inflightEntries *prometheus.GaugeVec
+	inflightEntries  *prometheus.GaugeVec
 	inflightTimeouts *prometheus.CounterVec
-	
+
 	// Worker metrics
-	workerTasksTotal     *prometheus.CounterVec
-	workerTaskDuration   *prometheus.HistogramVec
-	workerErrors         *prometheus.CounterVec
-	
+	workerTasksTotal   *prometheus.CounterVec
+	workerTaskDuration *prometheus.HistogramVec
+	workerErrors       *prometheus.CounterVec
+
 	// HTTP server
 	server *http.Server
+
+	keyListProvider func() []json.RawMessage
 }
 
 // NewMetrics creates new metrics instance
@@ -59,9 +62,14 @@ func NewMetrics(logger *slog.Logger, cfg *config.MetricsConfig) *Metrics {
 		logger: logger,
 		config: cfg,
 	}
-	
+
 	m.initMetrics()
 	return m
+}
+
+// SetKeyListProvider configures the data source for the /keylist endpoint.
+func (m *Metrics) SetKeyListProvider(provider func() []json.RawMessage) {
+	m.keyListProvider = provider
 }
 
 // initMetrics initializes all prometheus metrics
@@ -74,14 +82,14 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"connection_type"},
 	)
-	
+
 	m.connectionCount = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_connection_total",
 			Help: "Total number of connection attempts",
 		},
 	)
-	
+
 	// TCP metrics
 	m.tcpFramesSent = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -90,7 +98,7 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"frame_type", "target"},
 	)
-	
+
 	m.tcpFramesReceived = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_tcp_frames_received_total",
@@ -98,7 +106,7 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"frame_type"},
 	)
-	
+
 	m.tcpBytesTransmitted = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_tcp_bytes_transmitted_total",
@@ -106,25 +114,25 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"direction"},
 	)
-	
+
 	// NATS metrics
 	m.natsMessagesProcessed = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_nats_messages_processed_total",
-			Help: "Total number of NATS messages processed",  
+			Help: "Total number of NATS messages processed",
 		},
 		[]string{"direction", "status"},
 	)
-	
+
 	m.natsRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name: "tcp_bridge_nats_request_duration_seconds",
-			Help: "NATS request duration in seconds",
+			Name:    "tcp_bridge_nats_request_duration_seconds",
+			Help:    "NATS request duration in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"direction"},
 	)
-	
+
 	// Queue metrics
 	m.sendQueueSize = prometheus.NewGauge(
 		prometheus.GaugeOpts{
@@ -132,28 +140,28 @@ func (m *Metrics) initMetrics() {
 			Help: "Current send queue size",
 		},
 	)
-	
+
 	m.sendQueueUtilization = prometheus.NewGauge(
 		prometheus.GaugeOpts{
 			Name: "tcp_bridge_send_queue_utilization_percent",
 			Help: "Send queue utilization percentage",
 		},
 	)
-	
+
 	m.sendQueueEnqueueTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_send_queue_enqueue_total",
 			Help: "Total number of items enqueued to send queue",
 		},
 	)
-	
+
 	m.sendQueueDropTotal = prometheus.NewCounter(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_send_queue_drop_total",
 			Help: "Total number of items dropped from send queue",
 		},
 	)
-	
+
 	// Semaphore metrics
 	m.semaphoreUtilization = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -162,7 +170,7 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"semaphore"},
 	)
-	
+
 	m.semaphoreAcquireTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_semaphore_acquire_total",
@@ -170,7 +178,7 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"semaphore", "status"},
 	)
-	
+
 	// Inflight metrics
 	m.inflightEntries = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -179,15 +187,15 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"type"},
 	)
-	
+
 	m.inflightTimeouts = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "tcp_bridge_inflight_timeouts_total", 
+			Name: "tcp_bridge_inflight_timeouts_total",
 			Help: "Total number of inflight timeouts",
 		},
 		[]string{"type"},
 	)
-	
+
 	// Worker metrics
 	m.workerTasksTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -196,16 +204,16 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"pool", "status"},
 	)
-	
+
 	m.workerTaskDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name: "tcp_bridge_worker_task_duration_seconds",
-			Help: "Worker task duration in seconds",
+			Name:    "tcp_bridge_worker_task_duration_seconds",
+			Help:    "Worker task duration in seconds",
 			Buckets: prometheus.DefBuckets,
 		},
 		[]string{"pool"},
 	)
-	
+
 	m.workerErrors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "tcp_bridge_worker_errors_total",
@@ -213,7 +221,7 @@ func (m *Metrics) initMetrics() {
 		},
 		[]string{"pool", "error_type"},
 	)
-	
+
 	// Register all metrics
 	prometheus.MustRegister(
 		m.connectionState,
@@ -243,30 +251,48 @@ func (m *Metrics) Start() error {
 		m.logger.Info("metrics disabled")
 		return nil
 	}
-	
+
 	mux := http.NewServeMux()
 	mux.Handle(m.config.Path, promhttp.Handler())
-	
+
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
-	
+
+	mux.HandleFunc("/keylist", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		responses := []json.RawMessage{}
+		if m.keyListProvider != nil {
+			responses = m.keyListProvider()
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(responses); err != nil {
+			m.logger.Error("failed to encode keylist response", "error", err)
+			http.Error(w, "failed to encode response", http.StatusInternalServerError)
+		}
+	})
+
 	m.server = &http.Server{
 		Addr:         fmt.Sprintf(":%d", m.config.Port),
 		Handler:      mux,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 10 * time.Second,
 	}
-	
+
 	go func() {
 		m.logger.Info("starting metrics server", "address", m.server.Addr, "path", m.config.Path)
 		if err := m.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			m.logger.Error("metrics server error", "error", err)
 		}
 	}()
-	
+
 	return nil
 }
 

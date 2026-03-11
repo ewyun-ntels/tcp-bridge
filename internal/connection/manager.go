@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"tcp-bridge/internal/config"
+	"tcp-bridge/internal/tid"
 )
 
 // ConnectionManager는 우선순위 기반 장애조치(failover)를 지원하는 여러 TCP 연결을 관리합니다.
@@ -21,6 +22,7 @@ import (
 type ConnectionManager struct {
 	logger *slog.Logger
 	config *config.TCPConfig
+	store  *HandshakeStore
 
 	// 우선순위 순서로 정렬된 연결 관리자 배열
 	// connections[i]는 priority i를 가진 연결입니다.
@@ -65,8 +67,9 @@ type ConnMgr struct {
 	awaitingPong     bool      // PONG 대기 중 플래그
 
 	// Callbacks (lock 없이 호출됨 - deadlock 주의!)
-	onStateChange func(state string)
-	onFrameRead   func(frame *config.Frame)
+	onStateChange       func(state string)
+	onFrameRead         func(frame *config.Frame)
+	onHandshakeResponse func(sysID string, payload json.RawMessage)
 }
 
 // ID returns the stable connection identifier.
@@ -97,6 +100,7 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 	cm := &ConnectionManager{
 		logger:      logger,
 		config:      cfg,
+		store:       NewHandshakeStore(),
 		connections: make([]*ConnMgr, len(cfg.Endpoints)),
 	}
 
@@ -108,6 +112,7 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 			//"conn", connID,
 			"priority", endpoint.Priority,
 		), cfg, endpoint)
+		conn.onHandshakeResponse = cm.store.Save
 
 		// Priority 순서대로 저장 (index = priority)
 		if endpoint.Priority >= 0 && endpoint.Priority < len(cfg.Endpoints) {
@@ -303,6 +308,11 @@ func (cm *ConnectionManager) SetStateChangeCallback(callback func(connType strin
 	cm.onStateChange = callback
 }
 
+// ListHandshakeResponses returns the latest HELLO responses keyed by peer sys-id.
+func (cm *ConnectionManager) ListHandshakeResponses() []json.RawMessage {
+	return cm.store.List()
+}
+
 // Start starts the connection manager
 func (c *ConnMgr) Start(ctx context.Context) error {
 	c.logger.Info("starting connection manager", "endpoint", c.endpoint.Address())
@@ -464,7 +474,7 @@ func (c *ConnMgr) performHandshake() error {
 	// Send HELLO frame
 	helloFrame := &config.Frame{
 		Type:    config.FrameTypeHello,
-		TID:     0, // Handshake frames use TID 0
+		TID:     tid.Next(),
 		Payload: helloPayload,
 	}
 
@@ -478,7 +488,7 @@ func (c *ConnMgr) performHandshake() error {
 		return fmt.Errorf("failed to send hello: %w", err)
 	}
 
-	c.logger.Info(">>> HELLO-REQ sent", "sys-id", helloReq.SysID, "branch-name", helloReq.BranchName)
+	c.logger.Info(">>> HELLO-REQ sent", "tid", helloFrame.TID, "sys-id", helloReq.SysID, "branch-name", helloReq.BranchName)
 
 	// Read ACK frame
 	conn.SetReadDeadline(time.Now().Add(c.config.HandshakeTimeout))
@@ -522,15 +532,30 @@ func (c *ConnMgr) performHandshake() error {
 		}
 	}
 
-	// Parse ACK response
-	var ackResp config.HandshakeResponse
+	// Parse only the fields needed for runtime behavior; successful payloads are stored as raw JSON.
+	var ackResp struct {
+		SysID        string `json:"sys-id"`
+		Code         int    `json:"code"`
+		PingInterval int    `json:"ping-interval"`
+		Cause        string `json:"cause"`
+	}
 	if err := json.Unmarshal(payload, &ackResp); err != nil {
 		return fmt.Errorf("failed to unmarshal ack response: %w", err)
 	}
 
 	// Check response code
-	if ackResp.Code != 0 {
+	if ackResp.Code != 200 {
+		c.logger.Warn("HELLO response rejected",
+			"tid", binary.BigEndian.Uint32(header[4:8]),
+			"peer-sys-id", ackResp.SysID,
+			"code", ackResp.Code,
+			"cause", ackResp.Cause,
+			"payload", string(payload))
 		return fmt.Errorf("handshake failed with code %d: %s", ackResp.Code, ackResp.Cause)
+	}
+
+	if c.onHandshakeResponse != nil {
+		c.onHandshakeResponse(ackResp.SysID, payload)
 	}
 
 	// Store ping interval if provided
@@ -546,6 +571,7 @@ func (c *ConnMgr) performHandshake() error {
 	conn.SetWriteDeadline(time.Time{})
 
 	c.logger.Info("<<< HELLO-RESP received",
+		"tid", binary.BigEndian.Uint32(header[4:8]),
 		"peer-sys-id", ackResp.SysID,
 		"ping-interval", ackResp.PingInterval)
 
@@ -652,9 +678,7 @@ func (c *ConnMgr) readLoop() {
 		// Handle ping/pong frames (do not update activity for keep-alive messages)
 		if frame.IsPing() {
 			if frameType == config.FrameTypePing {
-				// Received PING, send PONG
-				c.logger.Info("<<< PING-REQ received", "tid", tid)
-				c.sendPong()
+				c.logger.Warn("unexpected PING-REQ received", "tid", tid)
 			} else if frameType == config.FrameTypePong {
 				// Received PONG, clear awaiting flag
 				c.activityMu.Lock()
@@ -842,7 +866,7 @@ func (c *ConnMgr) sendPing() error {
 	// PING frame has no payload (JSON-less)
 	pingFrame := &config.Frame{
 		Type:    config.FrameTypePing,
-		TID:     0, // Ping frames use TID 0
+		TID:     tid.Next(),
 		Payload: nil,
 	}
 
@@ -858,37 +882,7 @@ func (c *ConnMgr) sendPing() error {
 
 	// PING은 keep-alive용이므로 activity time을 갱신하지 않음
 
-	c.logger.Info(">>> PING-REQ sent")
-	return nil
-}
-
-// sendPong sends a PONG frame in response to a PING
-func (c *ConnMgr) sendPong() error {
-	conn := c.GetConn()
-	if conn == nil {
-		return fmt.Errorf("no connection available")
-	}
-
-	// PONG frame has no payload (JSON-less)
-	pongFrame := &config.Frame{
-		Type:    config.FrameTypePong,
-		TID:     0, // Pong frames use TID 0
-		Payload: nil,
-	}
-
-	pongData, err := pongFrame.Serialize()
-	if err != nil {
-		return fmt.Errorf("failed to serialize pong frame: %w", err)
-	}
-
-	conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-	if _, err := conn.Write(pongData); err != nil {
-		return fmt.Errorf("failed to send pong: %w", err)
-	}
-
-	// PONG은 keep-alive용이므로 activity time을 갱신하지 않음
-
-	c.logger.Info(">>> PING-RESP sent")
+	c.logger.Info(">>> PING-REQ sent", "tid", pingFrame.TID)
 	return nil
 }
 

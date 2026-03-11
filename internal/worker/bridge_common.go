@@ -2,17 +2,10 @@ package worker
 
 import (
 	"fmt"
-	"sync/atomic"
-	"time"
 
 	"tcp-bridge/internal/config"
 
 	"github.com/nats-io/nats.go"
-)
-
-var (
-	globalTIDCounter uint32
-	lastResetDate    int32
 )
 
 // resolveOutboundRoute resolves outbound request and response types by subject.
@@ -94,25 +87,4 @@ func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) {
 			h.logger.Error("failed to send error reply", "error", err)
 		}
 	}
-}
-
-// generateTID generates a sequential transaction ID with daily reset.
-func generateTID() uint32 {
-	now := time.Now()
-	currentDate := int32(now.Year()*10000 + int(now.Month())*100 + now.Day())
-
-	lastDate := atomic.LoadInt32(&lastResetDate)
-	if currentDate != lastDate {
-		if atomic.CompareAndSwapInt32(&lastResetDate, lastDate, currentDate) {
-			atomic.StoreUint32(&globalTIDCounter, 0)
-		}
-	}
-
-	tid := atomic.AddUint32(&globalTIDCounter, 1)
-	if tid == 0 {
-		atomic.StoreUint32(&globalTIDCounter, 1)
-		return 1
-	}
-
-	return tid
 }

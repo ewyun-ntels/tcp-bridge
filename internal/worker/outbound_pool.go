@@ -7,6 +7,7 @@ import (
 
 	"tcp-bridge/internal/config"
 	"tcp-bridge/internal/inflight"
+	"tcp-bridge/internal/tid"
 
 	"github.com/nats-io/nats.go"
 )
@@ -64,7 +65,7 @@ func (p *OutboundWorkerPool) process(msg *nats.Msg) {
 	logger := p.logger.With("subject", msg.Subject, "reply", msg.Reply)
 	logger.Debug("processing external request")
 
-	tid := generateTID()
+	tid := tid.Next()
 	isRPC := msg.Reply != ""
 	msgType, expectedRespType, ok := p.handler.resolveOutboundRoute(msg.Subject)
 	if !ok {

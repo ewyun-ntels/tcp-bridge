@@ -393,7 +393,7 @@ tcp-bridge는 TCP 서버와 연결 시 JSON 기반 handshake를 수행합니다.
 ```
 
 - `sys-id`: 응답하는 Peer Name
-- `code`: 결과 코드 (0=성공)
+- `code`: 결과 코드 (200=성공)
 - `ping-interval`: Ping 메시지 전송 주기 (초 단위)
 - `keyList`: 암호화 키 목록 (선택사항)
 - `cause`: 실패 시 상세 사유 (선택사항)

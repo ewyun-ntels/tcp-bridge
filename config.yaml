@@ -11,13 +11,13 @@ tcp:
       port: 8000
       priority: 0  # Primary (highest priority)
     - host: "127.0.0.1" 
-      port: 8000
+      port: 7000
       priority: 1  # Secondary
-   # - host: "127.0.0.1"
-   #   port: 7070
-   #   priority: 2  # Tertiary
+    - host: "127.0.0.1"
+      port: 7070
+      priority: 2  # Tertiary
   
-  connect_timeout: "5s"       # TCP 연결 시도 timeout (5초 내 연결 실패 시 connect failed)
+  connect_timeout: "2s"       # TCP 연결 시도 timeout (2초 내 연결 실패 시 connect failed)
   write_timeout: "30s"        # 데이터 전송(Write) 작업 timeout
   keep_alive: "30s"           # OS 레벨 TCP Keep-Alive 주기 (방화벽/NAT 타임아웃 방지)
   
@@ -61,7 +61,8 @@ nats:
         response_msg_type: "0c"       # Subs-Sync-Response
 
 message_handler:
-  outbound:  # NATS→TCP processing
+  # NATS→TCP processing (TCP Request/Response)
+  outbound:  
     # 각 시도별 TCP 응답 대기 시간 (이 시간 내 응답 없으면 재시도/failover)
     response_timeout: "5s"      # RPC 요청의 응답 대기 timeout (per-attempt)
                                 # - 전송 성공 후 응답 수신까지 대기하는 시간
@@ -76,7 +77,8 @@ message_handler:
     # = endpoints × retry_attempts × response_timeout
     # ≈ 1 × 10 × 5s = 50초 (모든 priority connection 실패 시)
   
-  inbound:   # TCP→NATS processing (NATS Request/Response)
+  # TCP→NATS processing (NATS Request/Response)
+  inbound:   
     timeout: "30s"              # NATS Request 응답 대기 시간
                                 # - TCP에서 받은 요청을 NATS로 전송 후 응답 대기
                                 # - NATS는 자체 고가용성 클러스터 구성으로 재시도 불필요
