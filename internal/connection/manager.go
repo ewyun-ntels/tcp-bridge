@@ -25,10 +25,10 @@ type ConnectionManager struct {
 	// 우선순위 순서로 정렬된 연결 관리자 배열
 	// connections[i]는 priority i를 가진 연결입니다.
 	connections []*ConnMgr
-	
+
 	// 활성 연결을 선택하고 관리하는 selector
 	selector *PriorityConnSelector
-	
+
 	// 연결 상태 변경 시 호출되는 콜백 (메트릭 수집 등에 사용)
 	onStateChange func(connType string, state string)
 }
@@ -39,34 +39,39 @@ type ConnectionManager struct {
 // 동시성: ConnMgr는 내부적으로 mutex를 사용하여 상태와 연결을 보호합니다.
 // 단, 콜백 함수는 lock 없이 호출되므로 callback 안에서 deadlock을 유발하지 않도록 주의해야 합니다.
 type ConnMgr struct {
-	id       string               // 연결 식별자 (예: "conn_0")
+	id       string // 연결 식별자 (예: "conn_0")
 	logger   *slog.Logger
 	config   *config.TCPConfig
-	endpoint config.TCPEndpoint   // 연결할 TCP 엔드포인트
-	
+	endpoint config.TCPEndpoint // 연결할 TCP 엔드포인트
+
 	// 연결 상태 (DISCONNECTED, CONNECTING, READY)
 	mu    sync.RWMutex
 	state string
 	conn  net.Conn
-	
+
 	// Lifecycle control
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
-	
+
 	// Ping control
 	pingInterval time.Duration // 서버로부터 받은 ping 주기
 	pingTimeout  time.Duration // PING 전송 후 PONG 대기 timeout
 	pingDone     chan struct{} // ping 고루틴 종료 신호
-	
+
 	// Activity tracking (for idle-based ping)
 	activityMu       sync.Mutex
 	lastActivityTime time.Time // 마지막 메시지 송수신 시간
 	awaitingPong     bool      // PONG 대기 중 플래그
-	
+
 	// Callbacks (lock 없이 호출됨 - deadlock 주의!)
 	onStateChange func(state string)
 	onFrameRead   func(frame *config.Frame)
+}
+
+// ID returns the stable connection identifier.
+func (c *ConnMgr) ID() string {
+	return c.id
 }
 
 // PriorityConnSelector는 우선순위 기반으로 활성 연결을 선택합니다.
@@ -75,11 +80,11 @@ type ConnMgr struct {
 // 동시성: thread-safe하며, ReEvaluate()는 연결 상태가 변경될 때마다 자동으로 호출됩니다.
 type PriorityConnSelector struct {
 	logger *slog.Logger
-	
+
 	mu             sync.RWMutex
-	connections    []*ConnMgr  // 우선순위 순서로 정렬된 연결 목록
-	active         *ConnMgr    // 현재 활성 연결
-	activePriority int         // 현재 활성 연결의 우선순위 (-1은 활성 연결 없음)
+	connections    []*ConnMgr // 우선순위 순서로 정렬된 연결 목록
+	active         *ConnMgr   // 현재 활성 연결
+	activePriority int        // 현재 활성 연결의 우선순위 (-1은 활성 연결 없음)
 }
 
 // NewConnectionManager는 새로운 연결 관리자를 생성합니다.
@@ -94,7 +99,7 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 		config:      cfg,
 		connections: make([]*ConnMgr, len(cfg.Endpoints)),
 	}
-	
+
 	// 각 endpoint에 대해 연결 관리자 생성 (priority 순서대로)
 	for i, endpoint := range cfg.Endpoints {
 		connID := fmt.Sprintf("conn_%d", endpoint.Priority)
@@ -103,7 +108,7 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 			//"conn", connID,
 			"priority", endpoint.Priority,
 		), cfg, endpoint)
-		
+
 		// Priority 순서대로 저장 (index = priority)
 		if endpoint.Priority >= 0 && endpoint.Priority < len(cfg.Endpoints) {
 			cm.connections[endpoint.Priority] = conn
@@ -111,7 +116,7 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 			// Priority가 범위를 벗어나면 순차적으로 저장 (fallback)
 			cm.connections[i] = conn
 		}
-		
+
 		// 상태 변경 콜백 설정
 		// 상태가 변경되면 메트릭을 업데이트하고, selector를 재평가합니다.
 		conn.onStateChange = func(state string) {
@@ -122,10 +127,10 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 			cm.selector.ReEvaluate()
 		}
 	}
-	
+
 	// 우선순위 기반 연결 selector 생성
 	cm.selector = NewPriorityConnSelector(logger, cm.connections)
-	
+
 	return cm
 }
 
@@ -138,16 +143,12 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 //   - cfg: TCP 설정
 //   - endpoint: 연결할 TCP 엔드포인트 정보
 func NewConnMgr(id string, logger *slog.Logger, cfg *config.TCPConfig, endpoint config.TCPEndpoint) *ConnMgr {
-	ctx, cancel := context.WithCancel(context.Background())
-	
 	return &ConnMgr{
 		id:          id,
 		logger:      logger,
 		config:      cfg,
 		endpoint:    endpoint,
 		state:       config.ConnStateDisconnected,
-		ctx:         ctx,
-		cancel:      cancel,
 		done:        make(chan struct{}),
 		pingTimeout: cfg.PingTimeout,
 	}
@@ -174,7 +175,7 @@ func NewPriorityConnSelector(logger *slog.Logger, connections []*ConnMgr) *Prior
 // 동시성: 모든 연결이 독립적인 고루틴에서 실행되므로 병렬로 동작합니다.
 func (cm *ConnectionManager) Start(ctx context.Context) error {
 	cm.logger.Info("starting connection manager", "total_connections", len(cm.connections))
-	
+
 	// 모든 연결 시작
 	for i, conn := range cm.connections {
 		if conn != nil {
@@ -189,7 +190,7 @@ func (cm *ConnectionManager) Start(ctx context.Context) error {
 			}
 		}
 	}
-	
+
 	cm.logger.Info("connection manager started")
 	return nil
 }
@@ -197,7 +198,7 @@ func (cm *ConnectionManager) Start(ctx context.Context) error {
 // Stop stops the connection manager
 func (cm *ConnectionManager) Stop() {
 	cm.logger.Info("stopping connection manager")
-	
+
 	// Stop all connections
 	for i, conn := range cm.connections {
 		if conn != nil {
@@ -205,7 +206,7 @@ func (cm *ConnectionManager) Stop() {
 			conn.Stop()
 		}
 	}
-	
+
 	cm.logger.Info("connection manager stopped")
 }
 
@@ -215,11 +216,12 @@ func (cm *ConnectionManager) Stop() {
 // Thread-safe: 여러 고루틴에서 동시에 호출할 수 있습니다.
 //
 // 사용 예시:
-//   conn := cm.GetActiveConn()
-//   if conn == nil {
-//       return errors.New("no ready connection available")
-//   }
-//   conn.Write(data)
+//
+//	conn := cm.GetActiveConn()
+//	if conn == nil {
+//	    return errors.New("no ready connection available")
+//	}
+//	conn.Write(data)
 func (cm *ConnectionManager) GetActiveConn() net.Conn {
 	return cm.selector.GetActiveConn()
 }
@@ -282,10 +284,11 @@ func (cm *ConnectionManager) GetConnectionByPriority(priority int) *ConnMgr {
 //   - 콜백 내에서 lock을 잡을 때 deadlock에 주의하세요.
 //
 // 사용 예시:
-//   cm.SetFrameReadCallback(func(frame *config.Frame) {
-//       // frame.ConnectionID로 endpoint 확인
-//       go handleFrameAsync(frame) // 긴 처리는 별도 고루틴에서
-//   })
+//
+//	cm.SetFrameReadCallback(func(frame *config.Frame) {
+//	    // frame.ConnectionID로 endpoint 확인
+//	    go handleFrameAsync(frame) // 긴 처리는 별도 고루틴에서
+//	})
 func (cm *ConnectionManager) SetFrameReadCallback(callback func(frame *config.Frame)) {
 	// 모든 연결에 콜백 설정 (Frame.ConnectionID로 endpoint 구분)
 	for _, conn := range cm.connections {
@@ -297,25 +300,32 @@ func (cm *ConnectionManager) SetFrameReadCallback(callback func(frame *config.Fr
 
 // SetStateChangeCallback sets the callback for state changes
 func (cm *ConnectionManager) SetStateChangeCallback(callback func(connType string, state string)) {
-	cm.onStateChange = callback  
+	cm.onStateChange = callback
 }
 
 // Start starts the connection manager
 func (c *ConnMgr) Start(ctx context.Context) error {
 	c.logger.Info("starting connection manager", "endpoint", c.endpoint.Address())
-	
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	c.ctx, c.cancel = context.WithCancel(ctx)
+
 	// Start connection loop
 	go c.connectionLoop()
-	
+
 	return nil
 }
 
 // Stop stops the connection manager
 func (c *ConnMgr) Stop() {
 	c.logger.Info("stopping connection manager")
-	
-	c.cancel()
-	
+
+	if c.cancel != nil {
+		c.cancel()
+	}
+
 	// Wait for connection loop to exit
 	select {
 	case <-c.done:
@@ -345,7 +355,7 @@ func (c *ConnMgr) setState(newState string) {
 	oldState := c.state
 	c.state = newState
 	c.mu.Unlock()
-	
+
 	if oldState != newState {
 		c.logger.Info("connection state changed", "from", oldState, "to", newState, "endpoint", c.endpoint.Address())
 		if c.onStateChange != nil {
@@ -357,23 +367,23 @@ func (c *ConnMgr) setState(newState string) {
 // connectionLoop manages the connection lifecycle
 func (c *ConnMgr) connectionLoop() {
 	defer close(c.done)
-	
+
 	ticker := time.NewTicker(5 * time.Second) // Reconnect interval
 	defer ticker.Stop()
-	
+
 	for {
 		select {
 		case <-c.ctx.Done():
 			c.cleanupConnection()
 			return
-			
+
 		case <-ticker.C:
 			// Drain any buffered ticks to prevent immediate retry
 			select {
 			case <-ticker.C:
 			default:
 			}
-			
+
 			state := c.GetState()
 			if state == config.ConnStateDisconnected || state == config.ConnStateConnectFailed {
 				c.attemptConnection()
@@ -385,7 +395,7 @@ func (c *ConnMgr) connectionLoop() {
 // attemptConnection attempts to establish a connection
 func (c *ConnMgr) attemptConnection() {
 	c.setState(config.ConnStateConnecting)
-	
+
 	// Establish TCP connection
 	conn, err := net.DialTimeout("tcp", c.endpoint.Address(), c.config.ConnectTimeout)
 	if err != nil {
@@ -393,18 +403,18 @@ func (c *ConnMgr) attemptConnection() {
 		c.setState(config.ConnStateConnectFailed)
 		return
 	}
-	
+
 	// Set connection options
 	if tcpConn, ok := conn.(*net.TCPConn); ok {
 		tcpConn.SetKeepAlive(true)
 		tcpConn.SetKeepAlivePeriod(c.config.KeepAlive)
 	}
-	
+
 	// Store connection
 	c.mu.Lock()
 	c.conn = conn
 	c.mu.Unlock()
-	
+
 	// Perform handshake
 	if err := c.performHandshake(); err != nil {
 		c.logger.Error("handshake failed", "error", err)
@@ -412,23 +422,23 @@ func (c *ConnMgr) attemptConnection() {
 		c.setState(config.ConnStateConnectFailed)
 		return
 	}
-	
+
 	// Connection ready
 	c.setState(config.ConnStateReady)
-	
+
 	// Initialize activity time
 	c.updateLastActivity()
-	
+
 	// Start ping loop if ping interval was set
 	c.mu.RLock()
 	pingInterval := c.pingInterval
 	c.mu.RUnlock()
-	
+
 	if pingInterval > 0 {
 		c.pingDone = make(chan struct{})
 		go c.pingLoop()
 	}
-	
+
 	// Start reading frames
 	go c.readLoop()
 }
@@ -439,51 +449,51 @@ func (c *ConnMgr) performHandshake() error {
 	if conn == nil {
 		return fmt.Errorf("no connection available")
 	}
-	
+
 	// Prepare HELLO request with sys-id and branch-name
 	helloReq := config.HandshakeRequest{
 		SysID:      c.config.SysID,
 		BranchName: c.config.BranchName,
 	}
-	
+
 	helloPayload, err := json.Marshal(helloReq)
 	if err != nil {
 		return fmt.Errorf("failed to marshal hello request: %w", err)
 	}
-	
+
 	// Send HELLO frame
 	helloFrame := &config.Frame{
 		Type:    config.FrameTypeHello,
 		TID:     0, // Handshake frames use TID 0
 		Payload: helloPayload,
 	}
-	
+
 	helloData, err := helloFrame.Serialize()
 	if err != nil {
 		return fmt.Errorf("failed to serialize hello frame: %w", err)
 	}
-	
+
 	conn.SetWriteDeadline(time.Now().Add(c.config.HandshakeTimeout))
 	if _, err := conn.Write(helloData); err != nil {
 		return fmt.Errorf("failed to send hello: %w", err)
 	}
-	
+
 	c.logger.Info(">>> HELLO-REQ sent", "sys-id", helloReq.SysID, "branch-name", helloReq.BranchName)
-	
+
 	// Read ACK frame
 	conn.SetReadDeadline(time.Now().Add(c.config.HandshakeTimeout))
-	
+
 	// Read frame header (8 bytes, 4.1.1)
 	header := make([]byte, 8)
 	if _, err := io.ReadFull(conn, header); err != nil {
 		return fmt.Errorf("failed to read ack header: %w", err)
 	}
-	
+
 	// Parse header to determine payload length
 	// Byte 1: Extension Bit + Protocol Version + Reserved
 	extVersion := (header[0] >> 7) & 0x01
 	protocolVer := (header[0] >> 5) & 0x03
-	
+
 	// Validate protocol version
 	if protocolVer != 0 {
 		return fmt.Errorf("unsupported protocol version: %d (expected 0)", protocolVer)
@@ -491,18 +501,18 @@ func (c *ConnMgr) performHandshake() error {
 	if extVersion != 0 {
 		return fmt.Errorf("unsupported extension bit: %d (expected 0)", extVersion)
 	}
-	
+
 	// Byte 2: Message Type
 	frameType := header[1]
-	
+
 	// Byte 3-4: Body Length
 	payloadLen := int(binary.BigEndian.Uint16(header[2:4]))
-	
+
 	// Validate ACK frame type
 	if frameType != config.FrameTypeAck {
 		return fmt.Errorf("expected ACK frame (0x%02x), got type 0x%02x", config.FrameTypeAck, frameType)
 	}
-	
+
 	// Read payload
 	var payload []byte
 	if payloadLen > 0 {
@@ -511,18 +521,18 @@ func (c *ConnMgr) performHandshake() error {
 			return fmt.Errorf("failed to read ack payload: %w", err)
 		}
 	}
-	
+
 	// Parse ACK response
 	var ackResp config.HandshakeResponse
 	if err := json.Unmarshal(payload, &ackResp); err != nil {
 		return fmt.Errorf("failed to unmarshal ack response: %w", err)
 	}
-	
+
 	// Check response code
 	if ackResp.Code != 0 {
 		return fmt.Errorf("handshake failed with code %d: %s", ackResp.Code, ackResp.Cause)
 	}
-	
+
 	// Store ping interval if provided
 	if ackResp.PingInterval > 0 {
 		c.mu.Lock()
@@ -530,15 +540,15 @@ func (c *ConnMgr) performHandshake() error {
 		c.mu.Unlock()
 		c.logger.Info("received ping interval", "interval", ackResp.PingInterval, "seconds", ackResp.PingInterval)
 	}
-	
+
 	// Clear read/write deadlines after handshake (ping-pong will manage connection health)
-	conn.SetReadDeadline(time.Time{})   // zero time = no deadline
+	conn.SetReadDeadline(time.Time{}) // zero time = no deadline
 	conn.SetWriteDeadline(time.Time{})
-	
-	c.logger.Info("<<< HELLO-RESP received", 
+
+	c.logger.Info("<<< HELLO-RESP received",
 		"peer-sys-id", ackResp.SysID,
 		"ping-interval", ackResp.PingInterval)
-	
+
 	return nil
 }
 
@@ -548,12 +558,12 @@ func (c *ConnMgr) readLoop() {
 	if conn == nil {
 		return
 	}
-	
+
 	defer func() {
 		c.cleanupConnection()
 		c.setState(config.ConnStateDisconnected)
 	}()
-	
+
 	for {
 		// Check context cancellation
 		select {
@@ -561,10 +571,10 @@ func (c *ConnMgr) readLoop() {
 			return
 		default:
 		}
-		
+
 		// ping-pong 메커니즘으로 연결 상태를 관리하므로 read timeout 미설정
 		// (ping_timeout으로 실제 연결 끊김 감지)
-		
+
 		// Read frame header (8 bytes, 4.1.1) - use ReadFull to ensure complete read
 		// Byte 1: Extension Bit + Protocol Version + Reserved
 		// Byte 2: Message Type
@@ -577,33 +587,33 @@ func (c *ConnMgr) readLoop() {
 			}
 			return
 		}
-		
+
 		// Parse header (4.1.1)
 		// Byte 1: Extension Bit + Protocol Version + Reserved
 		extVersion := (header[0] >> 7) & 0x01
 		protocolVer := (header[0] >> 5) & 0x03
-		
+
 		// Validate protocol version (4.1.1.b.ii)
 		if protocolVer != 0 {
 			c.logger.Error("unsupported protocol version", "version", protocolVer)
 			return
 		}
-		
+
 		// Extension bit는 현재 버전에서 0이어야 함 (4.1.1.a.ii)
 		if extVersion != 0 {
 			c.logger.Error("unsupported extension bit", "ext", extVersion)
 			return
 		}
-		
+
 		// Byte 2: Message Type (4.1.1.d)
 		frameType := header[1]
-		
+
 		// Byte 3-4: Body Length (4.1.1.e)
 		payloadLen := int(binary.BigEndian.Uint16(header[2:4]))
-		
+
 		// Byte 5-8: Transaction Identifier (4.1.1.f)
 		tid := binary.BigEndian.Uint32(header[4:8])
-		
+
 		// Log header details
 		c.logger.Info("TCP frame received",
 			"header", fmt.Sprintf("%02X %02X %02X %02X %02X %02X %02X %02X",
@@ -614,13 +624,13 @@ func (c *ConnMgr) readLoop() {
 			"body_len", payloadLen,
 			"tid", tid,
 			"connection_id", c.id)
-		
+
 		// Validate payload length
 		if payloadLen > c.config.MaxFrameSize {
 			c.logger.Error("frame too large", "size", payloadLen, "max", c.config.MaxFrameSize)
 			return
 		}
-		
+
 		// Read payload
 		var payload []byte
 		if payloadLen > 0 {
@@ -630,15 +640,15 @@ func (c *ConnMgr) readLoop() {
 				return
 			}
 		}
-		
+
 		// Create frame
 		frame := &config.Frame{
 			Type:         frameType,
 			TID:          tid,
 			Payload:      payload,
-			ConnectionID: c.id,  // Set connectionID for endpoint tracking
+			ConnectionID: c.id, // Set connectionID for endpoint tracking
 		}
-		
+
 		// Handle ping/pong frames (do not update activity for keep-alive messages)
 		if frame.IsPing() {
 			if frameType == config.FrameTypePing {
@@ -653,24 +663,24 @@ func (c *ConnMgr) readLoop() {
 				c.logger.Info("<<< PING-RESP received", "tid", tid)
 			}
 			// Skip further processing for ping/pong frames
-				c.logger.Debug("handled ping/pong frame", "type", frameType)
+			c.logger.Debug("handled ping/pong frame", "type", frameType)
 			continue
 		}
-		
+
 		// Skip handshake frames during normal operation
 		if frame.IsHandshake() {
 			c.logger.Debug("skipping handshake frame", "type", frameType)
 			continue
 		}
-		
+
 		// Update last activity time for data frames only (not ping/pong)
 		c.updateLastActivity()
-		
+
 		c.logger.Debug("dispatching frame to callback",
 			"type", frameType,
 			"tid", tid,
 			"has_callback", c.onFrameRead != nil)
-		
+
 		// Call frame read callback
 		if c.onFrameRead != nil {
 			c.onFrameRead(frame)
@@ -684,13 +694,13 @@ func (c *ConnMgr) readLoop() {
 func (c *ConnMgr) cleanupConnection() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	
+
 	// Stop ping loop if running
 	if c.pingDone != nil {
 		close(c.pingDone)
 		c.pingDone = nil
 	}
-	
+
 	if c.conn != nil {
 		c.conn.Close()
 		c.conn = nil
@@ -701,7 +711,7 @@ func (c *ConnMgr) cleanupConnection() {
 func (s *PriorityConnSelector) GetActiveConn() net.Conn {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	
+
 	if s.active != nil {
 		return s.active.GetConn()
 	}
@@ -717,9 +727,9 @@ func (s *PriorityConnSelector) GetActive() *ConnMgr {
 
 // ReEvaluate re-evaluates and selects the best available connection based on priority
 func (s *PriorityConnSelector) ReEvaluate() {
-	s.mu.Lock()  
+	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	s.selectActiveConnection()
 }
 
@@ -727,16 +737,16 @@ func (s *PriorityConnSelector) ReEvaluate() {
 func (s *PriorityConnSelector) selectActiveConnection() {
 	var newActive *ConnMgr
 	newPriority := -1
-	
+
 	// Find the highest priority (lowest index) READY connection
 	for i, conn := range s.connections {
 		if conn != nil && conn.GetState() == config.ConnStateReady {
 			newActive = conn
 			newPriority = i
-			break  // Found highest priority READY connection
+			break // Found highest priority READY connection
 		}
 	}
-	
+
 	// Update active connection if changed
 	if s.active != newActive {
 		oldActive := "nil"
@@ -744,16 +754,16 @@ func (s *PriorityConnSelector) selectActiveConnection() {
 		if s.active != nil {
 			oldActive = s.active.id
 		}
-		
+
 		newActiveID := "nil"
 		if newActive != nil {
 			newActiveID = newActive.id
 		}
-		
+
 		s.active = newActive
 		s.activePriority = newPriority
-		
-		s.logger.Info("active connection changed", 
+
+		s.logger.Info("active connection changed",
 			"from", oldActive, "from_priority", oldPriority,
 			"to", newActiveID, "to_priority", newPriority)
 	}
@@ -765,19 +775,19 @@ func (c *ConnMgr) pingLoop() {
 	interval := c.pingInterval
 	timeout := c.pingTimeout
 	c.mu.RUnlock()
-	
+
 	if interval == 0 {
 		c.logger.Warn("ping interval is 0, ping loop will not run")
 		return
 	}
-	
+
 	// Check idle time every 1 second for accurate timing
 	checkInterval := 1 * time.Second
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
-	
+
 	c.logger.Info("ping loop started", "ping_interval", interval, "check_interval", checkInterval, "ping_timeout", timeout)
-	
+
 	for {
 		select {
 		case <-c.pingDone:
@@ -791,7 +801,7 @@ func (c *ConnMgr) pingLoop() {
 			idleTime := time.Since(c.lastActivityTime)
 			awaitingPong := c.awaitingPong
 			c.activityMu.Unlock()
-			
+
 			// Check if PONG timeout occurred
 			if awaitingPong && idleTime > timeout {
 				c.logger.Error("ping timeout: no PONG received", "timeout", timeout, "idle_time", idleTime)
@@ -800,7 +810,7 @@ func (c *ConnMgr) pingLoop() {
 				c.setState(config.ConnStateDisconnected)
 				return
 			}
-			
+
 			// Send PING only if idle time exceeds ping interval and not already waiting for PONG
 			if !awaitingPong && idleTime >= interval {
 				c.logger.Info(">>> PING-REQ sending", "idle_time", idleTime)
@@ -811,7 +821,7 @@ func (c *ConnMgr) pingLoop() {
 					c.setState(config.ConnStateDisconnected)
 					return
 				}
-				
+
 				// Mark as awaiting PONG and update activity time to prevent duplicate PINGs
 				c.activityMu.Lock()
 				c.awaitingPong = true
@@ -828,26 +838,26 @@ func (c *ConnMgr) sendPing() error {
 	if conn == nil {
 		return fmt.Errorf("no connection available")
 	}
-	
+
 	// PING frame has no payload (JSON-less)
 	pingFrame := &config.Frame{
 		Type:    config.FrameTypePing,
 		TID:     0, // Ping frames use TID 0
 		Payload: nil,
 	}
-	
+
 	pingData, err := pingFrame.Serialize()
 	if err != nil {
 		return fmt.Errorf("failed to serialize ping frame: %w", err)
 	}
-	
+
 	conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 	if _, err := conn.Write(pingData); err != nil {
 		return fmt.Errorf("failed to send ping: %w", err)
 	}
-	
+
 	// PING은 keep-alive용이므로 activity time을 갱신하지 않음
-	
+
 	c.logger.Info(">>> PING-REQ sent")
 	return nil
 }
@@ -858,26 +868,26 @@ func (c *ConnMgr) sendPong() error {
 	if conn == nil {
 		return fmt.Errorf("no connection available")
 	}
-	
+
 	// PONG frame has no payload (JSON-less)
 	pongFrame := &config.Frame{
 		Type:    config.FrameTypePong,
 		TID:     0, // Pong frames use TID 0
 		Payload: nil,
 	}
-	
+
 	pongData, err := pongFrame.Serialize()
 	if err != nil {
 		return fmt.Errorf("failed to serialize pong frame: %w", err)
 	}
-	
+
 	conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 	if _, err := conn.Write(pongData); err != nil {
 		return fmt.Errorf("failed to send pong: %w", err)
 	}
-	
+
 	// PONG은 keep-alive용이므로 activity time을 갱신하지 않음
-	
+
 	c.logger.Info(">>> PING-RESP sent")
 	return nil
 }
@@ -895,7 +905,7 @@ func (c *ConnMgr) Write(data []byte) (int, error) {
 	if conn == nil {
 		return 0, fmt.Errorf("no connection available")
 	}
-	
+
 	conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
 	n, err := conn.Write(data)
 	if err == nil && n > 0 {

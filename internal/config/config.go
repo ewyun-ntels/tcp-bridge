@@ -19,20 +19,20 @@ import (
 // - metrics: Prometheus 메트릭 설정 (HTTP 포트, 경로)
 // - logging: 로그 레벨 설정 (debug/info/warn/error)
 type Config struct {
-	Server     ServerConfig     `yaml:"server"`
-	TCP        TCPConfig        `yaml:"tcp"`
-	NATS       NATSConfig       `yaml:"nats"`
+	Server         ServerConfig         `yaml:"server"`
+	TCP            TCPConfig            `yaml:"tcp"`
+	NATS           NATSConfig           `yaml:"nats"`
 	MessageHandler MessageHandlerConfig `yaml:"message_handler"`
-	Queue      QueueConfig      `yaml:"queue"`
-	Metrics    MetricsConfig    `yaml:"metrics"`
-	Logging    LoggingConfig    `yaml:"logging"`
+	Queue          QueueConfig          `yaml:"queue"`
+	Metrics        MetricsConfig        `yaml:"metrics"`
+	Logging        LoggingConfig        `yaml:"logging"`
 }
 
 // ServerConfig contains general server configuration
 type ServerConfig struct {
-	Name        string        `yaml:"name"`
-	Version     string        `yaml:"version"`
-	Environment string        `yaml:"environment"`
+	Name            string        `yaml:"name"`
+	Version         string        `yaml:"version"`
+	Environment     string        `yaml:"environment"`
 	ShutdownTimeout time.Duration `yaml:"shutdown_timeout"`
 }
 
@@ -49,6 +49,7 @@ type ServerConfig struct {
 //   - Byte 2: Message Type
 //   - Byte 3-4: Body Length (Big Endian, uint16)
 //   - Byte 5-8: Transaction Identifier (Big Endian, uint32)
+//
 // - MaxFrameSize: 프레임 payload 최대 크기 (NATS max_payload: 1MB)
 //
 // Handshake:
@@ -59,23 +60,23 @@ type ServerConfig struct {
 // - idle 시 PING(0x03) 전송 → PONG(0x04) 대기
 // - PingTimeout 내 PONG 미수신 시 연결 종료 및 재연결
 type TCPConfig struct {
-	Endpoints []TCPEndpoint `yaml:"endpoints"`  // 외부 서버 endpoint 목록 (priority 기반 정렬)
-	
+	Endpoints []TCPEndpoint `yaml:"endpoints"` // 외부 서버 endpoint 목록 (priority 기반 정렬)
+
 	// Connection settings
-	ConnectTimeout    time.Duration `yaml:"connect_timeout"`    // 연결 시도 timeout
-	ReadTimeout       time.Duration `yaml:"read_timeout"`       // (미사용) ping-pong으로 연결 상태 관리
-	WriteTimeout      time.Duration `yaml:"write_timeout"`      // 단일 write 작업 timeout
-	KeepAlive         time.Duration `yaml:"keep_alive"`         // TCP KeepAlive interval
-	
+	ConnectTimeout time.Duration `yaml:"connect_timeout"` // 연결 시도 timeout
+	ReadTimeout    time.Duration `yaml:"read_timeout"`    // (미사용) ping-pong으로 연결 상태 관리
+	WriteTimeout   time.Duration `yaml:"write_timeout"`   // 단일 write 작업 timeout
+	KeepAlive      time.Duration `yaml:"keep_alive"`      // TCP KeepAlive interval
+
 	// Frame settings
 	MaxFrameSize    int `yaml:"max_frame_size"`    // 최대 frame payload 크기 (프로토콜 스펙: uint16 최대값 65535)
 	FrameHeaderSize int `yaml:"frame_header_size"` // Frame header 크기 (8 bytes)
-	
+
 	// Hello/ACK handshake
 	HandshakeTimeout time.Duration `yaml:"handshake_timeout"` // HELLO/ACK handshake timeout
-	SysID           string        `yaml:"sys_id"`            // 접속하는 Peer Name
-	BranchName      string        `yaml:"branch_name"`       // 국사명 (SS/DS/BR)
-	
+	SysID            string        `yaml:"sys_id"`            // 접속하는 Peer Name
+	BranchName       string        `yaml:"branch_name"`       // 국사명 (SS/DS/BR)
+
 	// Ping/Pong
 	PingTimeout time.Duration `yaml:"ping_timeout"` // PING 전송 후 PONG 대기 timeout
 }
@@ -87,90 +88,131 @@ type TCPEndpoint struct {
 	Priority int    `yaml:"priority"`
 }
 
-// NATSConfig contains NATS-related configuration  
+// NATSConfig contains NATS-related configuration
 type NATSConfig struct {
-	URLs           []string      `yaml:"urls"`
-	ConnectTimeout time.Duration `yaml:"connect_timeout"`
-	
-	// Subjects
-	ExternalReqSubject string              `yaml:"external_req_subject"` // NATS→TCP subject
-	MessageTypeRouting MessageTypeRouting  `yaml:"message_type_routing"` // TCP→NATS Message Type별 subject 매핑
-	
-	// 하위 호환성을 위해 유지 (사용 안함)
-	RoutingRules RoutingRules `yaml:"routing_rules"` // Deprecated: Use MessageTypeRouting instead
-	
-	// Request settings
-	RequestTimeout time.Duration `yaml:"request_timeout"`
+	URLs               []string           `yaml:"urls"`
+	ConnectTimeout     time.Duration      `yaml:"connect_timeout"`
+	MessageTypeRouting MessageTypeRouting `yaml:"message_type_routing"` // TCP→NATS Message Type별 subject 매핑
 }
 
 // MessageTypeRouting defines how to route TCP messages to NATS subjects based on Message Type
 type MessageTypeRouting struct {
-	NatsToTCP map[string]NatsToTCPRoute `yaml:"nats_to_tcp"` // NATS → TCP 라우팅
-	TCPToNATS map[string]TCPToNATSRoute `yaml:"tcp_to_nats"` // TCP → NATS 라우팅
+	Outbound map[string]OutboundRoute `yaml:"outbound"` // NATS → TCP 라우팅
+	Inbound  map[string]InboundRoute  `yaml:"inbound"`  // TCP → NATS 라우팅
 }
 
-// NatsToTCPRoute defines routing info for NATS → TCP direction
-type NatsToTCPRoute struct {
+// OutboundRoute defines routing info for the outbound direction (NATS → TCP).
+type OutboundRoute struct {
+	Subject         string `yaml:"subject"`           // NATS subject
 	ResponseMsgType string `yaml:"response_msg_type"` // 기대되는 응답 메시지 타입 (hex)
 }
 
-// TCPToNATSRoute defines routing info for TCP → NATS direction
-type TCPToNATSRoute struct {
+// InboundRoute defines routing info for the inbound direction (TCP → NATS).
+type InboundRoute struct {
 	Subject         string `yaml:"subject"`           // NATS subject
 	ResponseMsgType string `yaml:"response_msg_type"` // TCP로 보낼 응답 메시지 타입 (hex)
 }
 
-// GetSubjectForMessageType returns the NATS subject for given message type (TCP → NATS)
+// GetInboundSubjectForMessageType returns the NATS subject for a TCP → NATS request type.
 // Returns empty string if no mapping exists
-func (m *MessageTypeRouting) GetSubjectForMessageType(msgType uint8) string {
+func (m *MessageTypeRouting) GetInboundSubjectForMessageType(msgType uint8) string {
 	key := fmt.Sprintf("%02x", msgType)
-	if route, exists := m.TCPToNATS[key]; exists {
+	if route, exists := m.Inbound[key]; exists {
 		return route.Subject
 	}
 	return ""
+}
+
+// GetOutboundRouteBySubject returns the NATS→TCP route for a given subject.
+func (m *MessageTypeRouting) GetOutboundRouteBySubject(subject string) (OutboundRoute, bool) {
+	for _, route := range m.Outbound {
+		if route.Subject == subject {
+			return route, true
+		}
+	}
+	return OutboundRoute{}, false
+}
+
+// GetOutboundSubjects returns all configured NATS→TCP subjects.
+func (m *MessageTypeRouting) GetOutboundSubjects() []string {
+	subjects := make([]string, 0, len(m.Outbound))
+	for _, route := range m.Outbound {
+		if route.Subject != "" {
+			subjects = append(subjects, route.Subject)
+		}
+	}
+	return subjects
+}
+
+// IsRequestType returns true if msgType is configured as a request type in either direction.
+func (m *MessageTypeRouting) IsRequestType(msgType uint8) bool {
+	key := fmt.Sprintf("%02x", msgType)
+	if _, exists := m.Outbound[key]; exists {
+		return true
+	}
+	if _, exists := m.Inbound[key]; exists {
+		return true
+	}
+	return false
+}
+
+// IsResponseType returns true if msgType is configured as a response type in either direction.
+func (m *MessageTypeRouting) IsResponseType(msgType uint8) bool {
+	key := fmt.Sprintf("%02x", msgType)
+
+	for _, route := range m.Outbound {
+		if route.ResponseMsgType == key {
+			return true
+		}
+	}
+	for _, route := range m.Inbound {
+		if route.ResponseMsgType == key {
+			return true
+		}
+	}
+	return false
+}
+
+// IsOutboundRequestType returns true if msgType is configured for NATS→TCP requests.
+func (m *MessageTypeRouting) IsOutboundRequestType(msgType uint8) bool {
+	key := fmt.Sprintf("%02x", msgType)
+	_, exists := m.Outbound[key]
+	return exists
+}
+
+// IsInboundRequestType returns true if msgType is configured for TCP→NATS requests.
+func (m *MessageTypeRouting) IsInboundRequestType(msgType uint8) bool {
+	key := fmt.Sprintf("%02x", msgType)
+	_, exists := m.Inbound[key]
+	return exists
 }
 
 // GetResponseType returns the response message type for given request type
 // Returns 0 if no mapping exists
 func (m *MessageTypeRouting) GetResponseType(msgType uint8) uint8 {
 	key := fmt.Sprintf("%02x", msgType)
-	
+
 	// TCP → NATS 방향 확인
-	if route, exists := m.TCPToNATS[key]; exists {
+	if route, exists := m.Inbound[key]; exists {
 		var respType uint8
 		fmt.Sscanf(route.ResponseMsgType, "%02x", &respType)
 		return respType
 	}
-	
+
 	// NATS → TCP 방향 확인
-	if route, exists := m.NatsToTCP[key]; exists {
+	if route, exists := m.Outbound[key]; exists {
 		var respType uint8
 		fmt.Sscanf(route.ResponseMsgType, "%02x", &respType)
 		return respType
 	}
-	
+
 	return 0
-}
-
-// RoutingRules defines how to route TCP messages to NATS subjects (Deprecated)
-type RoutingRules struct {
-	Field          string            `yaml:"field"`           // TCP 메시지에서 라우팅 기준 필드
-	Mapping        map[string]string `yaml:"mapping"`         // 필드 값 → NATS subject 매핑
-	DefaultSubject string            `yaml:"default_subject"` // 매핑되지 않은 경우 기본 subject
-}
-
-// GetSubject returns the NATS subject for given field value
-func (r *RoutingRules) GetSubject(fieldValue string) string {
-	if subject, exists := r.Mapping[fieldValue]; exists {
-		return subject
-	}
-	return r.DefaultSubject
 }
 
 // MessageHandlerConfig contains message handler configuration
 type MessageHandlerConfig struct {
-	Internal MessageHandlerPoolConfig `yaml:"internal"` // NATS→TCP processing
-	External MessageHandlerPoolConfig `yaml:"external"` // TCP→NATS processing
+	Outbound MessageHandlerPoolConfig `yaml:"outbound"` // NATS→TCP processing
+	Inbound  MessageHandlerPoolConfig `yaml:"inbound"`  // TCP→NATS processing
 }
 
 // MessageHandlerPoolConfig represents configuration for message handling
@@ -178,7 +220,8 @@ type MessageHandlerPoolConfig struct {
 	Timeout         time.Duration `yaml:"timeout"`          // 전체 처리 timeout (optional, 안전장치)
 	ResponseTimeout time.Duration `yaml:"response_timeout"` // 각 시도별 응답 대기 시간
 	RetryAttempts   int           `yaml:"retry_attempts"`   // 같은 connection 재시도 횟수
-	RetryDelay      time.Duration `yaml:"retry_delay"`      // 재시도 간 대기 시간
+	WorkerCount     int           `yaml:"worker_count"`     // 처리 worker 수
+	QueueSize       int           `yaml:"queue_size"`       // 처리 큐 크기
 }
 
 // QueueConfig contains queue configuration
@@ -211,15 +254,15 @@ func LoadConfig(configPath string) (*Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to read config file: %w", err)
 	}
-	
+
 	var cfg Config
 	if err := yaml.Unmarshal(data, &cfg); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
-	
+
 	// Set defaults
 	setDefaults(&cfg)
-	
+
 	return &cfg, nil
 }
 
@@ -228,125 +271,118 @@ func setDefaults(cfg *Config) {
 	if cfg.Server.ShutdownTimeout == 0 {
 		cfg.Server.ShutdownTimeout = 30 * time.Second
 	}
-	
+
 	if cfg.TCP.ConnectTimeout == 0 {
 		cfg.TCP.ConnectTimeout = 5 * time.Second
 	}
-	
+
 	// ReadTimeout: 미사용 (ping-pong으로 연결 상태 관리)
 	if cfg.TCP.ReadTimeout == 0 {
 		cfg.TCP.ReadTimeout = 30 * time.Second
 	}
-	
+
 	if cfg.TCP.WriteTimeout == 0 {
 		cfg.TCP.WriteTimeout = 30 * time.Second
 	}
-	
+
 	if cfg.TCP.KeepAlive == 0 {
 		cfg.TCP.KeepAlive = 30 * time.Second
 	}
-	
+
 	if cfg.TCP.MaxFrameSize == 0 {
 		cfg.TCP.MaxFrameSize = 65535 // 64KB (프로토콜 스펙: Body Length는 uint16 최대값)
 	}
-	
+
 	if cfg.TCP.FrameHeaderSize == 0 {
 		cfg.TCP.FrameHeaderSize = 8 // 4 bytes length + 4 bytes tid
 	}
-	
+
 	if cfg.TCP.HandshakeTimeout == 0 {
 		cfg.TCP.HandshakeTimeout = 10 * time.Second
 	}
-	
+
 	if cfg.TCP.PingTimeout == 0 {
 		cfg.TCP.PingTimeout = 5 * time.Second
 	}
-	
+
 	if cfg.NATS.ConnectTimeout == 0 {
 		cfg.NATS.ConnectTimeout = 5 * time.Second
 	}
-	
-	if cfg.NATS.RequestTimeout == 0 {
-		cfg.NATS.RequestTimeout = 30 * time.Second
-	}
-	
-	if cfg.NATS.ExternalReqSubject == "" {
-		cfg.NATS.ExternalReqSubject = "external_req"
-	}
-	
+
 	// Set default message type routing if not configured
-	if cfg.NATS.MessageTypeRouting.NatsToTCP == nil {
-		cfg.NATS.MessageTypeRouting.NatsToTCP = map[string]NatsToTCPRoute{
-			"05": {ResponseMsgType: "06"}, // Subs-Change
-			"09": {ResponseMsgType: "0a"}, // CellInfo-Noti
+	if cfg.NATS.MessageTypeRouting.Outbound == nil {
+		cfg.NATS.MessageTypeRouting.Outbound = map[string]OutboundRoute{
+			"05": {Subject: "tcp.subs.change", ResponseMsgType: "06"},
+			"09": {Subject: "tcp.cellinfo.noti", ResponseMsgType: "0a"},
 		}
 	}
-	if cfg.NATS.MessageTypeRouting.TCPToNATS == nil {
-		cfg.NATS.MessageTypeRouting.TCPToNATS = map[string]TCPToNATSRoute{
+	if cfg.NATS.MessageTypeRouting.Inbound == nil {
+		cfg.NATS.MessageTypeRouting.Inbound = map[string]InboundRoute{
 			"07": {Subject: "tcp.subs.info", ResponseMsgType: "08"}, // Subs-Info
 			"0b": {Subject: "tcp.subs.sync", ResponseMsgType: "0c"}, // Subs-Sync
 		}
 	}
-	
-	// Set default routing rules if not configured (backward compatibility)
-	if cfg.NATS.RoutingRules.Field == "" {
-		cfg.NATS.RoutingRules.Field = "message_type"
-	}
-	if cfg.NATS.RoutingRules.DefaultSubject == "" {
-		cfg.NATS.RoutingRules.DefaultSubject = "internal_req"
-	}
-	if cfg.NATS.RoutingRules.Mapping == nil {
-		cfg.NATS.RoutingRules.Mapping = map[string]string{
-			"user":   "internal_req.user",
-			"order":  "internal_req.order",
-			"notify": "internal_req.notify",
-		}
-	}
-	
-if cfg.MessageHandler.Internal.Timeout == 0 {
-		cfg.MessageHandler.Internal.Timeout = 60 * time.Second
+
+	if cfg.MessageHandler.Outbound.Timeout == 0 {
+		cfg.MessageHandler.Outbound.Timeout = 60 * time.Second
 	}
 
-	if cfg.MessageHandler.External.Timeout == 0 {
-		cfg.MessageHandler.External.Timeout = 60 * time.Second
+	if cfg.MessageHandler.Inbound.Timeout == 0 {
+		cfg.MessageHandler.Inbound.Timeout = 60 * time.Second
 	}
 
-	if cfg.MessageHandler.Internal.RetryAttempts == 0 {
-		cfg.MessageHandler.Internal.RetryAttempts = 3
+	if cfg.MessageHandler.Outbound.ResponseTimeout == 0 {
+		cfg.MessageHandler.Outbound.ResponseTimeout = 5 * time.Second
 	}
 
-	if cfg.MessageHandler.External.RetryAttempts == 0 {
-		cfg.MessageHandler.External.RetryAttempts = 3
+	if cfg.MessageHandler.Inbound.ResponseTimeout == 0 {
+		cfg.MessageHandler.Inbound.ResponseTimeout = 5 * time.Second
 	}
 
-	if cfg.MessageHandler.Internal.RetryDelay == 0 {
-		cfg.MessageHandler.Internal.RetryDelay = 1 * time.Second
+	if cfg.MessageHandler.Outbound.RetryAttempts == 0 {
+		cfg.MessageHandler.Outbound.RetryAttempts = 3
 	}
 
-	if cfg.MessageHandler.External.RetryDelay == 0 {
-		cfg.MessageHandler.External.RetryDelay = 1 * time.Second
+	if cfg.MessageHandler.Inbound.RetryAttempts == 0 {
+		cfg.MessageHandler.Inbound.RetryAttempts = 3
 	}
-	
+
+	if cfg.MessageHandler.Outbound.WorkerCount == 0 {
+		cfg.MessageHandler.Outbound.WorkerCount = 4
+	}
+
+	if cfg.MessageHandler.Inbound.WorkerCount == 0 {
+		cfg.MessageHandler.Inbound.WorkerCount = 4
+	}
+
+	if cfg.MessageHandler.Outbound.QueueSize == 0 {
+		cfg.MessageHandler.Outbound.QueueSize = 128
+	}
+
+	if cfg.MessageHandler.Inbound.QueueSize == 0 {
+		cfg.MessageHandler.Inbound.QueueSize = 128
+	}
+
 	if cfg.Queue.SendQueueSize == 0 {
 		cfg.Queue.SendQueueSize = 10000
 	}
-	
+
 	if cfg.Queue.SendTimeout == 0 {
 		cfg.Queue.SendTimeout = 5 * time.Second
 	}
-	
+
 	if cfg.Metrics.Port == 0 {
 		cfg.Metrics.Port = 8080
 	}
-	
+
 	if cfg.Metrics.Path == "" {
 		cfg.Metrics.Path = "/metrics"
 	}
-	
+
 	if cfg.Logging.Level == "" {
 		cfg.Logging.Level = "info"
 	}
-	
+
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "json"
 	}

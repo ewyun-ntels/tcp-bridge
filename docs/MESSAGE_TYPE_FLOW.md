@@ -53,8 +53,8 @@ TCP Bridge는 다음과 같은 메시지 타입을 처리합니다:
 
 #### 코드 위치
 
-- Handler: [`internal/worker/handlers.go::HandleExternalRequest`](../internal/worker/handlers.go)
-- Response 전송: [`internal/worker/handlers.go::sendAndWaitWithRetry`](../internal/worker/handlers.go) (line ~289)
+- Handler: [`internal/worker/bridge_handler.go::HandleOutboundRequest`](../internal/worker/bridge_handler.go)
+- Response 전송: [`internal/worker/outbound_pool.go::sendAndWaitWithRetry`](../internal/worker/outbound_pool.go)
 
 ```go
 // TCP 응답의 payload만 NATS로 전송
@@ -96,9 +96,9 @@ replyPublisher.PublishReply(inflightEntry.ReplySubject, responseFrame.Payload)
 
 #### 코드 위치
 
-- Handler: [`internal/worker/handlers.go::HandleTCPRequest`](../internal/worker/handlers.go)
-- NATS 라우팅: [`internal/config/config.go::GetSubjectForMessageType`](../internal/config/config.go)
-- Response 전송: [`internal/worker/handlers.go::sendTCPResponseToConnection`](../internal/worker/handlers.go)
+- Handler: [`internal/worker/bridge_handler.go::HandleInboundFrame`](../internal/worker/bridge_handler.go)
+- NATS 라우팅: [`internal/config/config.go::GetInboundSubjectForMessageType`](../internal/config/config.go)
+- Response 전송: [`internal/worker/bridge_common.go::sendTCPResponseToConnection`](../internal/worker/bridge_common.go)
 
 ```go
 // NATS 응답을 TCP로 전송 시 헤더 포함
@@ -198,7 +198,7 @@ nats sub tcp.subs.info
 
 **증상**: NATS 클라이언트가 헤더 데이터를 받음
 
-**원인**: `HandleExternalRequest`에서 전체 프레임을 전송
+**원인**: `HandleOutboundRequest`에서 전체 프레임을 전송
 
 **해결**: Line 289 확인 - `responseFrame.Payload`만 전송하는지 확인
 
@@ -206,7 +206,7 @@ nats sub tcp.subs.info
 
 **증상**: TCP 서버가 JSON만 받음
 
-**원인**: `HandleTCPRequest`에서 payload만 전송
+**원인**: `HandleInboundFrame`에서 payload만 전송
 
 **해결**: `sendTCPResponseToConnection`이 호출되는지 확인 - Frame 전체를 전송해야 함
 
@@ -217,4 +217,4 @@ nats sub tcp.subs.info
 - [프레임 구조](../internal/config/types.go) - `Frame` 타입 정의
 - [NATS 클라이언트](../internal/nats/client.go) - NATS 통신 로직
 - [TCP 통신](../internal/tcp/tcp.go) - TCP 송수신 로직
-- [메시지 핸들러](../internal/worker/handlers.go) - 메시지 처리 로직
+- [메시지 핸들러](../internal/worker/bridge_handler.go) - 메시지 처리 로직

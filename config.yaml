@@ -34,25 +34,25 @@ nats:
   urls: 
     - "nats://localhost:4222"
   connect_timeout: "5s"
-  
-  external_req_subject: "external_req"  # NATS→TCP subject
-  
+
   # Message Type 라우팅 설정 (4.1.1.d)
   # 
-  # NATS → TCP: 요청 타입별 응답 타입 정의
+  # NATS → TCP: 요청 타입별 NATS subject 및 응답 타입 정의
   # TCP → NATS: 요청 타입별 NATS subject 및 응답 타입 정의
   # 
   # 참고: Hello(0x01/0x02), Ping(0x03/0x04)은 TCP 연결 관리용이므로 설정 불필요
   message_type_routing:
     # NATS → TCP 방향
-    nats_to_tcp:
+    outbound:
       "05":                           # Subs-Change-Request
+        subject: "tcp.subs.change"
         response_msg_type: "06"       # Subs-Change-Response
       "09":                           # CellInfo-Noti-Request
+        subject: "tcp.cellinfo.noti"
         response_msg_type: "0a"       # CellInfo-Noti-Response
     
     # TCP → NATS 방향
-    tcp_to_nats:
+    inbound:
       "07":                           # Subs-Info-Request
         subject: "tcp.subs.info"
         response_msg_type: "08"       # Subs-Info-Response
@@ -61,23 +61,27 @@ nats:
         response_msg_type: "0c"       # Subs-Sync-Response
 
 message_handler:
-  internal:  # NATS→TCP processing
+  outbound:  # NATS→TCP processing
     # 각 시도별 TCP 응답 대기 시간 (이 시간 내 응답 없으면 재시도/failover)
     response_timeout: "5s"      # RPC 요청의 응답 대기 timeout (per-attempt)
                                 # - 전송 성공 후 응답 수신까지 대기하는 시간
                                 # - 빠른 응답 감지를 위해 짧게 설정 (3-5s 권장)
     
-    # 같은 connection 재시도 설정 (VIP 절체 대응)
+    # 같은 connection 재시도 설정
     retry_attempts: 10           # 같은 priority에서 재시도 횟수
+    worker_count: 4              # NATS→TCP worker 수
+    queue_size: 128              # NATS→TCP 작업 큐 크기
     
     # 참고: 최대 소요 시간은 자동 계산됨
     # = endpoints × retry_attempts × response_timeout
     # ≈ 1 × 10 × 5s = 50초 (모든 priority connection 실패 시)
   
-  external:  # TCP→NATS processing (NATS Request/Response)
+  inbound:   # TCP→NATS processing (NATS Request/Response)
     timeout: "30s"              # NATS Request 응답 대기 시간
                                 # - TCP에서 받은 요청을 NATS로 전송 후 응답 대기
                                 # - NATS는 자체 고가용성 클러스터 구성으로 재시도 불필요
+    worker_count: 4             # TCP→NATS worker 수
+    queue_size: 128             # TCP→NATS 작업 큐 크기
 
 metrics:
   enabled: true

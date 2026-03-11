@@ -23,10 +23,10 @@ import (
 type Sender struct {
 	logger *slog.Logger
 	config *config.TCPConfig
-	
+
 	// Dependencies
 	connMgr *connection.ConnectionManager // 우선순위 기반 연결 관리자
-	
+
 	// Concurrency control
 	mu sync.Mutex // TCP 쓰기 작업 보호 (프레임 경계 보장)
 }
@@ -42,21 +42,22 @@ type Sender struct {
 // 1. Start() 호출 → SetFrameReadCallback로 하위 계층에 함수 등록
 // 2. TCP 연결에서 frame 수신 → handleFrame() 콜백 호출
 // 3. handleFrame에서 타입 분류 → 등록된 콜백 호출
-//    - REQUEST: onRequestFrame → TCP→NATS 흐름 (외부 요청)
-//    - RESPONSE: onResponseFrame → Inflight-A에서 매칭 처리
+//   - REQUEST: onRequestFrame → TCP→NATS 흐름 (외부 요청)
+//   - RESPONSE: onResponseFrame → Inflight-A에서 매칭 처리
 //
 // 동시성: 실제 읽기는 각 ConnMgr의 readLoop에서 수행 (병렬 처리)
 type Reader struct {
-	logger *slog.Logger
-	config *config.TCPConfig
-	
-	// Dependencies  
+	logger  *slog.Logger
+	config  *config.TCPConfig
+	routing *config.MessageTypeRouting
+
+	// Dependencies
 	connMgr *connection.ConnectionManager
-	
+
 	// Callbacks for frame dispatch
-	onRequestFrame  func(frame *config.Frame)  // TCP→NATS 흐름 처리기
+	onRequestFrame  func(frame *config.Frame) // TCP→NATS 흐름 처리기
 	onResponseFrame func(frame *config.Frame) // NATS→TCP 응답 처리기
-	
+
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -73,15 +74,17 @@ func NewSender(logger *slog.Logger, cfg *config.TCPConfig, connMgr *connection.C
 }
 
 // NewReader creates a new TCP reader
-func NewReader(logger *slog.Logger, cfg *config.TCPConfig, connMgr *connection.ConnectionManager) *Reader {
-	ctx, cancel := context.WithCancel(context.Background())
-	
+func NewReader(
+	logger *slog.Logger,
+	cfg *config.TCPConfig,
+	routing *config.MessageTypeRouting,
+	connMgr *connection.ConnectionManager,
+) *Reader {
 	return &Reader{
 		logger:  logger,
 		config:  cfg,
+		routing: routing,
 		connMgr: connMgr,
-		ctx:     ctx,
-		cancel:  cancel,
 		done:    make(chan struct{}),
 	}
 }
@@ -107,23 +110,23 @@ func (s *Sender) SendFrame(frame *config.Frame) error {
 	// Lock to ensure frame boundary integrity
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Serialize frame
 	data, err := frame.Serialize()
 	if err != nil {
 		return fmt.Errorf("failed to serialize frame: %w", err)
 	}
-	
+
 	// Write through ConnectionManager (updates activity time automatically)
 	bytesWritten, err := s.connMgr.Write(data)
 	if err != nil {
 		return fmt.Errorf("failed to write frame: %w", err)
 	}
-	
+
 	if bytesWritten != len(data) {
 		return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", bytesWritten, len(data))
 	}
-	
+
 	// Log header details
 	s.logger.Info("TCP frame sent",
 		"header", fmt.Sprintf("%02X %02X %02X %02X %02X %02X %02X %02X",
@@ -133,7 +136,7 @@ func (s *Sender) SendFrame(frame *config.Frame) error {
 		"body_len", uint16(len(data)-8),
 		"tid", frame.TID,
 		"bytes", bytesWritten)
-	
+
 	return nil
 }
 
@@ -145,23 +148,23 @@ func (s *Sender) SendFrameToConnection(connectionID string, frame *config.Frame)
 	// Lock to ensure frame boundary integrity
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	// Serialize frame
 	data, err := frame.Serialize()
 	if err != nil {
 		return fmt.Errorf("failed to serialize frame: %w", err)
 	}
-	
+
 	// Write to specific connection
 	bytesWritten, err := s.connMgr.WriteToConnection(connectionID, data)
 	if err != nil {
 		return fmt.Errorf("failed to write frame to connection %s: %w", connectionID, err)
 	}
-	
+
 	if bytesWritten != len(data) {
 		return fmt.Errorf("incomplete write: wrote %d bytes, expected %d", bytesWritten, len(data))
 	}
-	
+
 	// Log header details for specific connection
 	s.logger.Info("📤 TCP frame sent to connection",
 		"connection_id", connectionID,
@@ -172,19 +175,24 @@ func (s *Sender) SendFrameToConnection(connectionID string, frame *config.Frame)
 		"body_len", uint16(len(data)-8),
 		"tid", frame.TID,
 		"bytes", bytesWritten)
-	
+
 	return nil
 }
 
 // Start starts the TCP reader
 func (r *Reader) Start(ctx context.Context) error {
 	r.logger.Info("starting TCP reader")
-	
+
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	r.ctx, r.cancel = context.WithCancel(ctx)
+
 	// Set frame read callback on connection manager
 	r.connMgr.SetFrameReadCallback(r.handleFrame)
-	
+
 	go r.readerLoop()
-	
+
 	r.logger.Info("TCP reader started")
 	return nil
 }
@@ -192,9 +200,11 @@ func (r *Reader) Start(ctx context.Context) error {
 // Stop stops the TCP reader
 func (r *Reader) Stop() {
 	r.logger.Info("stopping TCP reader")
-	
-	r.cancel()
-	
+
+	if r.cancel != nil {
+		r.cancel()
+	}
+
 	// Wait for reader loop to exit
 	select {
 	case <-r.done:
@@ -217,7 +227,7 @@ func (r *Reader) SetResponseFrameCallback(callback func(frame *config.Frame)) {
 // readerLoop manages the reader lifecycle
 func (r *Reader) readerLoop() {
 	defer close(r.done)
-	
+
 	// Reader lifecycle is managed by connection manager
 	// This loop just waits for context cancellation
 	<-r.ctx.Done()
@@ -229,30 +239,28 @@ func (r *Reader) handleFrame(frame *config.Frame) {
 		"tid", frame.TID,
 		"type", fmt.Sprintf("0x%02x", frame.Type),
 		"payload_size", len(frame.Payload))
-	
+
 	// Handshake frames are handled by connection manager (4.1.1.d: 0x01, 0x02)
 	if frame.IsHandshake() {
 		r.logger.Debug("handshake frame ignored in reader", "type", fmt.Sprintf("0x%02x", frame.Type))
 		return
 	}
-	
+
 	// Ping/Pong frames are handled by connection manager (4.1.1.d: 0x03, 0x04)
 	if frame.IsPing() {
 		r.logger.Debug("ping/pong frame ignored in reader", "type", fmt.Sprintf("0x%02x", frame.Type))
 		return
 	}
-	
-	// Business messages (4.1.1.d: 0x05~0x0c)
-	// Request: 홀수 (0x05, 0x07, 0x09, 0x0b) -> TCP→NATS
-	// Response: 짝수 (0x06, 0x08, 0x0a, 0x0c) -> NATS→TCP 응답
-	if frame.IsRequest() {
+
+	// Business messages are classified by configured message_type_routing.
+	if r.routing.IsRequestType(frame.Type) {
 		// TCP inbound request -> spawn goroutine for TCP→NATS processing
 		if r.onRequestFrame != nil {
 			r.onRequestFrame(frame)
 		} else {
 			r.logger.Warn("no handler for request frame", "tid", frame.TID, "type", fmt.Sprintf("0x%02x", frame.Type))
 		}
-	} else if frame.IsResponse() {
+	} else if r.routing.IsResponseType(frame.Type) {
 		// TCP response -> match with inflight-A entries (NATS→TCP)
 		if r.onResponseFrame != nil {
 			r.onResponseFrame(frame)

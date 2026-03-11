@@ -235,10 +235,10 @@
         <mxCell id="step4b" value="4. Register&#xa;Inflight-B&#xa;→ InflightB.Register()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d0cee2;strokeColor=#56517e;fontSize=11;" vertex="1" parent="lane3b">
           <mxGeometry x="20" y="250" width="140" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="step5b" value="5. Route to&#xa;NATS Subject&#xa;→ determineNATSSubject()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="lane3b">
+        <mxCell id="step5b" value="5. Route to&#xa;NATS Subject&#xa;→ MessageTypeRouting.GetSubjectForMessageType()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=11;" vertex="1" parent="lane3b">
           <mxGeometry x="20" y="315" width="140" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="step6b" value="6. NATS&#xa;Request()&#xa;→ Requester.Request()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane4b">
+        <mxCell id="step6b" value="6. NATS&#xa;Request()&#xa;→ Requester.RequestWithTimeoutToSubject()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="lane4b">
           <mxGeometry x="20" y="380" width="140" height="50" as="geometry" />
         </mxCell>
         <mxCell id="step7b" value="7. Process&#xa;&amp; Respond" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="lane5b">
@@ -287,7 +287,7 @@
           </mxGeometry>
         </mxCell>
         <!-- Notes -->
-        <mxCell id="note1b" value="Routing Rules (config.RoutingRules):&#xa;Payload field → NATS subject mapping&#xa;→ determineNATSSubject(), GetSubject()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;" vertex="1" parent="1">
+        <mxCell id="note1b" value="MessageTypeRouting (config.MessageTypeRouting):&#xa;TCP request type → NATS subject mapping&#xa;→ GetSubjectForMessageType()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;" vertex="1" parent="1">
           <mxGeometry x="80" y="720" width="440" height="50" as="geometry" />
         </mxCell>
         <mxCell id="note2b" value="Inflight-B (inflight.InflightEntryB):&#xa;Tracks TCP→NATS pending requests with TID&#xa;→ InflightB.Register(), Remove()" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;" vertex="1" parent="1">
@@ -388,7 +388,7 @@
         <mxCell id="configfield2" value="nats.external_req_subject: string - Queue Group subscription subject for external requests" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;" vertex="1" parent="config1">
           <mxGeometry x="20" y="90" width="960" height="25" as="geometry" />
         </mxCell>
-        <mxCell id="configfield3" value="nats.routing_rules: RoutingRules - Payload field mapping to NATS subjects" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;" vertex="1" parent="config1">
+        <mxCell id="configfield3" value="nats.message_type_routing: MessageTypeRouting - TCP message type to NATS subject mapping" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;align=left;" vertex="1" parent="config1">
           <mxGeometry x="20" y="120" width="960" height="25" as="geometry" />
         </mxCell>
       </root>

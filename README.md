@@ -25,11 +25,10 @@ TCP 브리지는 Go로 구현된 고성능, 내결함성 TCP-to-NATS 메시지 �
 4. Inflight-A에 등록 (RPC만)
 5. **Priority 기반 재시도 전략**:
    - Priority 0 (Primary): `retry_attempts`번 시도 (각 시도마다 `response_timeout` 대기)
-   - 실패 시 `retry_delay` 대기 (VIP 절체 시간 고려)
    - 모두 실패 시 Priority 1 (Secondary)로 Failover하여 동일하게 재시도
    - Priority 2 (Tertiary)까지 모두 시도
 6. TCP 응답 수신 시 **NATS Reply Publisher**가 응답 전송
-7. **Manual Ack**: 처리 완료 후 NATS 메시지 확인 (재시도 완료 보장)
+7. **Core NATS Queue Group** 기반으로 여러 bridge 인스턴스 간 로드 밸런싱
 
 #### TCP → NATS (External 방향)
 1. **Reader**가 TCP REQUEST 프레임 수신 (각 connection별 고루틴)
@@ -46,8 +45,7 @@ VIP 절체 발생 시 안정적인 메시지 전송을 보장합니다:
 ```
 Priority 0 (Primary VIP):
   0초:  1차 전송 → 성공 → response_timeout(5초) 대기
-  5초:  응답 없음 → retry_delay(2초) 대기
-  7초:  2차 전송 → 성공 → response_timeout 대기
+  5초:  응답 없음 → 2차 전송 → response_timeout 대기
   10초: VIP 절체 완료, 응답 수신! ✅
 
 Priority 0 완전 다운:
@@ -142,15 +140,8 @@ attemptConnection() 호출
 TCP 연결 재시도 → Handshake → READY
 ```
 
-**retry_delay와의 관계**
-
-- `retry_delay: 2s` 설정 시, 재시도 간 2초 대기
-- 이 시간 동안 백그라운드 재연결이 완료될 기회 확보
-- 예: 1차 시도 실패 → 2초 대기 → 2차 시도 (재연결 완료 가능성 높음)
-
 ### 3. NATS Queue Group 기반 로드 밸런싱
 - **Queue Group 활용**: 여러 tcp-bridge 인스턴스 간 자동 로드 밸런싱
-- **Manual Ack**: 재시도 완료 후에만 메시지 ACK로 손실 방지
 - **종료 시 안전성**: tcp-bridge 종료해도 NATS에 메시지 안전 보관
 - **병렬 처리**: 각 메시지는 독립된 고루틴에서 처리
 
@@ -243,20 +234,17 @@ nats:
       "0c": "tcp.subs.sync.res"        # Subs-Sync-Response
     default_subject: "tcp.unknown"
   
-  request_timeout: "30s"
 
 # 메시지 처리 설정 (VIP 절체 대응)
 message_handler:
-  internal:  # NATS→TCP processing
+  outbound:  # NATS→TCP processing
     response_timeout: "5s"    # 각 시도별 TCP 응답 대기 시간
-    retry_attempts: 3         # 같은 connection에 재시도 횟수 (VIP 절체 대응)
-    retry_delay: "2s"         # 재시도 간 대기 시간 (VIP 절체 시간 고려)
-    # 참고: 최대 소요 시간 = endpoints(3) × retry_attempts(3) × (response_timeout(5s) + retry_delay(2s)) ≈ 63초
+    retry_attempts: 3         # 같은 connection에 재시도 횟수
+    # 참고: 최대 소요 시간 = endpoints(3) × retry_attempts(3) × response_timeout(5s) ≈ 45초
   
-  external:  # TCP→NATS processing
+  inbound:  # TCP→NATS processing
     timeout: "30s"
     retry_attempts: 3
-    retry_delay: "1s"
 
 # 메트릭 설정
 metrics:
@@ -501,12 +489,11 @@ docker run --rm -it \
 
 ### 1. NATS Queue Group 기반 메시지 처리
 - **Queue Group 활용**: 여러 tcp-bridge 인스턴스 간 자동 로드 밸런싱
-- **Manual Ack**: 재시도 완료 후에만 메시지 ACK로 손실 방지
 - **종료 시 안전성**: tcp-bridge 종료해도 NATS에 메시지 안전 보관
 - **병렬 처리**: 각 메시지는 독립된 고루틴에서 동시 처리
 
 ### 2. VIP 절체 대응 재시도 로직
-- **같은 Connection 재시도**: VIP 절체 시간 고려 (retry_delay: 2초)
+- **같은 Connection 재시도**: 지정 횟수만큼 즉시 재시도
 - **빠른 Failover**: response_timeout (5초) 내 응답 없으면 즉시 재시도
 - **Priority 순차 시도**: Primary (3번) → Secondary (3번) → Tertiary (3번)
 - **자동 재연결 대기**: ConnectionManager가 백그라운드에서 5초 간격 재연결
