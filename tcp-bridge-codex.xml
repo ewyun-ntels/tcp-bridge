@@ -46,10 +46,10 @@
         <mxCell id="b1" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="ConnMgr.readLoop()&#xa;- reads business frame&#xa;- sets frame.ConnectionID" vertex="1">
           <mxGeometry height="80" width="240" x="990" y="130" as="geometry" />
         </mxCell>
-        <mxCell id="b2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="tcp.Reader.handleFrame(frame)&#xa;- request: onRequestFrame(frame)&#xa;- response: onResponseFrame(frame)" vertex="1">
+        <mxCell id="b2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="tcp.Reader.handleFrame(frame)&#xa;- MessageTypeRouting.IsRequestType(frame.Type) =&gt; onRequestFrame(frame)&#xa;- MessageTypeRouting.IsResponseType(frame.Type) =&gt; onResponseFrame(frame)" vertex="1">
           <mxGeometry height="90" width="240" x="1270" y="130" as="geometry" />
         </mxCell>
-        <mxCell id="b3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="FrameDispatcher.DispatchRequestFrame(frame)&#xa;- validates IsRequest()&#xa;- calls bridge.HandleInboundFrame(frame)" vertex="1">
+        <mxCell id="b3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="FrameDispatcher.DispatchRequestFrame(frame)&#xa;- validates MessageTypeRouting.IsRequestType(frame.Type)&#xa;- calls bridge.HandleInboundFrame(frame)" vertex="1">
           <mxGeometry height="90" width="280" x="1550" y="130" as="geometry" />
         </mxCell>
         <mxCell id="b4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="BridgeHandler.HandleInboundFrame(frame)&#xa;- inboundPool.Enqueue(frame)&#xa;- if full: sendTCPErrorResponseToConnection(...)" vertex="1">
@@ -171,7 +171,7 @@
         <mxCell id="d_tid" value="global TID state&#xa;- globalTIDCounter uint32&#xa;- lastResetDate int32&#xa;- atomic daily reset + overflow guard" style="swimlane;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1" vertex="1" parent="1">
           <mxGeometry x="870" y="610" width="300" height="140" as="geometry" />
         </mxCell>
-        <mxCell id="d_note" value="Current implementation detail&#xa;InflightB is registered/removed for lifecycle tracking, but RequestWithTimeoutToSubject() returns synchronously, so ResponseChan is not the active rendezvous path in processTCPRequest()." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d79b00" vertex="1" parent="1">
+        <mxCell id="d_note" value="Current implementation detail&#xa;InflightB is registered/removed for lifecycle tracking, but RequestWithTimeoutToSubject() returns synchronously, so ResponseChan is not the active rendezvous path in InboundWorkerPool.process()." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d79b00" vertex="1" parent="1">
           <mxGeometry x="1220" y="610" width="500" height="130" as="geometry" />
         </mxCell>
         <mxCell id="de1" style="endArrow=block;html=1;strokeColor=#d79b00" edge="1" parent="1" source="d_pool" target="d_handler">
@@ -224,7 +224,7 @@
         <mxCell id="g2" value="metrics HTTP server goroutine&#xa;- metrics.Start()&#xa;- ListenAndServe()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666" vertex="1" parent="1">
           <mxGeometry x="330" y="120" width="220" height="90" as="geometry" />
         </mxCell>
-        <mxCell id="g3" value="collectMetrics goroutine&#xa;- go a.collectMetrics()&#xa;- periodic metrics sampling" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666" vertex="1" parent="1">
+        <mxCell id="g3" value="collectMetrics goroutine&#xa;- go a.collectMetrics()&#xa;- 10s ticker (currently placeholder loop)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666" vertex="1" parent="1">
           <mxGeometry x="590" y="120" width="220" height="90" as="geometry" />
         </mxCell>
         <mxCell id="g4" value="Inflight cleanup goroutines&#xa;- InflightA cleanupLoop()&#xa;- InflightB cleanupLoop()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d79b00" vertex="1" parent="1">
@@ -349,10 +349,10 @@
         <mxCell id="kr_g5" parent="1" style="rounded=0;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="[구조체] worker.InboundWorkerPool&#xa;[함수] workerLoop(workerID)&#xa;TCP 요청을 NATS 요청으로 처리" vertex="1">
           <mxGeometry height="90" width="260" x="60" y="820" as="geometry" />
         </mxCell>
-        <mxCell id="kr_c3" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#82b366" value="[구조체] tcp.Reader / main.App&#xa;[함수] handleFrame() → handleTCPRequest()&#xa;TCP 요청 프레임을 받아 워커 큐로 넘김" vertex="1">
+        <mxCell id="kr_c3" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#82b366" value="[구조체] tcp.Reader / main.App / worker.FrameDispatcher&#xa;[함수] handleFrame() → handleTCPRequest() → DispatchRequestFrame()&#xa;TCP 요청 프레임을 받아 inbound 워커 큐로 넘김" vertex="1">
           <mxGeometry height="110" width="280" x="360" y="810" as="geometry" />
         </mxCell>
-        <mxCell id="kr_c4" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#b85450" value="[구조체] tcp.Reader / main.App&#xa;[함수] handleFrame() → handleTCPResponse()&#xa;TCP 응답을 inflight A로 전달" vertex="1">
+        <mxCell id="kr_c4" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#b85450" value="[구조체] tcp.Reader / main.App / inflight.InflightA&#xa;[함수] handleFrame() → handleTCPResponse() → HandleResponse()&#xa;TCP 응답을 inflight A로 매칭 전달" vertex="1">
           <mxGeometry height="110" width="280" x="680" y="810" as="geometry" />
         </mxCell>
         <mxCell id="kr_c5" parent="1" style="ellipse;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#5b8def" value="[구조체] nats.Subscriber / worker.BridgeHandler&#xa;[함수] SubscribeSubjectsWithQueue() → HandleOutboundRequest()&#xa;NATS 메시지를 받아 outbound 워커 큐에 적재" vertex="1">

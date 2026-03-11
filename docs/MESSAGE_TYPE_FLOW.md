@@ -1,220 +1,146 @@
 # 메시지 타입 처리 가이드
 
-## 메시지 타입 정의
+이 문서는 현재 구현 기준의 message type 라우팅과 실제 처리 경로를 설명합니다. 기준 소스는 `internal/config`, `internal/tcp`, `internal/worker`, `internal/inflight`입니다.
 
-TCP Bridge는 다음과 같은 메시지 타입을 처리합니다:
+## 메시지 타입
 
-| 값   | 의미                        | 방향          | 용도          |
-|------|-----------------------------|---------------|---------------|
-| 0x01 | Hello-Request               | TCP 연결 관리 | Handshake     |
-| 0x02 | Hello-Response              | TCP 연결 관리 | Handshake     |
-| 0x03 | Ping-Request                | TCP 연결 관리 | Keepalive     |
-| 0x04 | Ping-Response               | TCP 연결 관리 | Keepalive     |
-| 0x05 | Subs-Change-Request         | NATS → TCP    | 비즈니스      |
-| 0x06 | Subs-Change-Response        | TCP → NATS    | 비즈니스      |
-| 0x07 | Subs-Info-Request           | TCP → NATS    | 비즈니스      |
-| 0x08 | Subs-Info-Response          | NATS → TCP    | 비즈니스      |
-| 0x09 | CellInfo-Noti-Request       | NATS → TCP    | 비즈니스      |
-| 0x0a | CellInfo-Noti-Response      | TCP → NATS    | 비즈니스      |
-| 0x0b | Subs-Sync-Request           | TCP → NATS    | 비즈니스      |
-| 0x0c | Subs-Sync-Response          | NATS → TCP    | 비즈니스      |
+| 값 | 이름 | 요청 방향 | 응답 방향 |
+|---|---|---|---|
+| `0x01` | HELLO request | bridge -> TCP server | handshake |
+| `0x02` | HELLO response | TCP server -> bridge | handshake |
+| `0x03` | PING request | bridge -> TCP server | keepalive |
+| `0x04` | PONG response | TCP server -> bridge | keepalive |
+| `0x05` | Subs-Change request | NATS -> TCP | `0x06` |
+| `0x06` | Subs-Change response | TCP -> NATS reply | from `0x05` |
+| `0x07` | Subs-Info request | TCP -> NATS | `0x08` |
+| `0x08` | Subs-Info response | NATS -> TCP reply | from `0x07` |
+| `0x09` | CellInfo-Noti request | NATS -> TCP | `0x0a` |
+| `0x0a` | CellInfo-Noti response | TCP -> NATS reply | from `0x09` |
+| `0x0b` | Subs-Sync request | TCP -> NATS | `0x0c` |
+| `0x0c` | Subs-Sync response | NATS -> TCP reply | from `0x0b` |
 
-**참고**: Hello와 Ping은 TCP 연결 레벨에서 직접 처리되며 NATS 라우팅을 거치지 않습니다.
+Hello/Ping 계열은 `ConnectionManager`가 직접 처리하며 NATS 라우팅 테이블에 넣지 않습니다.
 
-## 메시지 플로우
+## 설정 형식
 
-### 1. NATS → TCP 방향
-
-**요청 타입**: `0x05`, `0x09` (비즈니스 메시지)
-
-```
-┌──────┐                  ┌────────────┐                  ┌──────────┐
-│ NATS │ ─── Request ───> │ TCP Bridge │ ─── Request ───> │ TCP Srv  │
-│      │                  │            │                  │          │
-│      │ <── Payload ──── │            │ <── Response ─── │          │
-└──────┘                  └────────────┘                  └──────────┘
-```
-
-#### 처리 로직
-
-1. **요청 수신**: NATS에서 `external_req` subject로 요청 수신
-2. **메시지 타입 결정**: 
-   - Payload에서 `msg_type` 필드 추출 (있는 경우)
-   - 없으면 기본값 `0x05` 사용
-3. **TCP 전송**: 
-   - 헤더 생성 (8 bytes): `[Extension|Type|Length|TID]`
-   - 헤더 + Payload를 TCP로 전송
-4. **응답 처리**: 
-   - TCP로부터 응답 프레임 수신
-   - **Payload만 추출** (헤더 제거)
-   - NATS reply subject로 전송
-
-**참고**: Hello(0x01), Ping(0x03)은 TCP 연결 관리용이므로 이 플로우를 따르지 않습니다.
-
-#### 코드 위치
-
-- Handler: [`internal/worker/bridge_handler.go::HandleOutboundRequest`](../internal/worker/bridge_handler.go)
-- Response 전송: [`internal/worker/outbound_pool.go::sendAndWaitWithRetry`](../internal/worker/outbound_pool.go)
-
-```go
-// TCP 응답의 payload만 NATS로 전송
-replyPublisher.PublishReply(inflightEntry.ReplySubject, responseFrame.Payload)
-```
-
----
-
-### 2. TCP → NATS 방향
-
-**요청 타입**: `0x07`, `0x0b`
-
-```
-┌──────────┐                  ┌────────────┐                  ┌──────┐
-│ TCP Srv  │ ─── Request ───> │ TCP Bridge │ ─── Payload ───> │ NATS │
-│          │                  │            │                  │      │
-│          │ <── Response ─── │            │ <── Payload ──── │      │
-└──────────┘                  └────────────┘                  └──────┘
-```
-
-#### 처리 로직
-
-1. **요청 수신**: TCP에서 프레임 수신
-   - 헤더 파싱: `[Extension|Type|Length|TID]`
-   - Payload 추출
-2. **NATS 라우팅**: 
-   - Message Type을 기준으로 NATS subject 결정
-   - `0x07` → `tcp.subs.info`
-   - `0x0b` → `tcp.subs.sync`
-3. **NATS 요청**: 
-   - **Payload만 NATS로 전송** (헤더 제거)
-   - Request/Response 패턴으로 대기
-4. **응답 처리**: 
-   - NATS로부터 응답 수신 (payload)
-   - 응답 타입 계산: `요청 타입 + 1`
-     - `0x07` → `0x08`
-     - `0x0b` → `0x0c`
-   - **헤더 생성** + Payload를 TCP로 전송
-
-#### 코드 위치
-
-- Handler: [`internal/worker/bridge_handler.go::HandleInboundFrame`](../internal/worker/bridge_handler.go)
-- NATS 라우팅: [`internal/config/config.go::GetInboundSubjectForMessageType`](../internal/config/config.go)
-- Response 전송: [`internal/worker/bridge_common.go::sendTCPResponseToConnection`](../internal/worker/bridge_common.go)
-
-```go
-// NATS 응답을 TCP로 전송 시 헤더 포함
-responseFrame := &config.Frame{
-    Type:    responseType,  // 요청 타입 + 1
-    TID:     tid,
-    Payload: response,      // NATS 응답
-}
-```
-
----
-
-## 설정 파일
-
-### config.yaml
+현재 구현은 `message_type_routing.outbound`와 `message_type_routing.inbound`를 분리합니다.
 
 ```yaml
 nats:
-  external_req_subject: "external_req"  # NATS→TCP 요청 subject
-  
   message_type_routing:
-    mapping:
-      # NATS → TCP 방향 (참고용)
-      "01": "tcp.hello"
-      "03": "tcp.ping"
-      "05": "tcp.subs.change"
-      "09": "tcp.cellinfo.noti"
-      
-      # TCP → NATS 방향 (실제 라우팅)
-      "07": "tcp.subs.info"          # Subs-Info-Request
-      "0b": "tcp.subs.sync"          # Subs-Sync-Request
+    outbound:
+      "05":
+        subject: "tcp.subs.change"
+        response_msg_type: "06"
+      "09":
+        subject: "tcp.cellinfo.noti"
+        response_msg_type: "0a"
+    inbound:
+      "07":
+        subject: "tcp.subs.info"
+        response_msg_type: "08"
+      "0b":
+        subject: "tcp.subs.sync"
+        response_msg_type: "0c"
 ```
 
----
+- outbound map key: NATS -> TCP request type
+- inbound map key: TCP -> NATS request type
+- `response_msg_type`: 기대하거나 생성할 TCP response type
 
-## 주요 함수
+## NATS -> TCP 흐름
 
-### Frame 검증 메서드
+대상 타입: `0x05`, `0x09`
 
-```go
-// types.go
+1. `BridgeHandler.Start()`가 `GetOutboundSubjects()`로 subject 목록을 얻습니다.
+2. `Subscriber.SubscribeSubjectsWithQueue(subjects, "tcp-bridge-workers", ...)`가 각 subject를 queue group으로 구독합니다.
+3. NATS 메시지가 들어오면 `HandleOutboundRequest()`가 outbound 작업 큐에 적재합니다.
+4. `OutboundWorkerPool.process()`는 `resolveOutboundRoute(subject)`로 request/response type을 구합니다.
+5. `tid.Next()`로 TID를 만들고 `config.Frame{Type,TID,Payload}`를 생성합니다.
+6. RPC 요청이면 `InflightA.Register()`가 entry를 생성합니다.
+7. `sendAndWaitWithRetry()`는 priority 순서대로 READY connection을 순회합니다.
+8. 응답이 오면 `InflightA.HandleResponse()`가 type / connectionID를 검증하고 `ResponseChan`으로 전달합니다.
+9. `ReplyPublisher.PublishReply()`는 TCP response의 payload만 NATS reply subject에 전송합니다.
 
-// NATS→TCP 요청인지 확인
-func (f *Frame) IsNATSToTCPRequest() bool {
-    return f.Type == 0x01 || f.Type == 0x03 || 
-           f.Type == 0x05 || f.Type == 0x09
-}
+중요한 점:
 
-// TCP→NATS 요청인지 확인
-func (f *Frame) IsTCPToNATSRequest() bool {
-    return f.Type == 0x07 || f.Type == 0x0b
-}
+- 구독 subject는 단일 `external_req`가 아니라 `message_type_routing.outbound[*].subject` 목록입니다.
+- request 타입은 payload에서 추출하지 않고 NATS subject에서 역으로 결정합니다.
+- RPC가 아닌 fire-and-forget 메시지는 `msg.Reply == ""`로 구분합니다.
 
-// 응답 타입 계산
-func (f *Frame) GetResponseType() uint8 {
-    if f.IsRequest() {
-        return f.Type + 1
-    }
-    return f.Type
-}
-```
+## TCP -> NATS 흐름
 
----
+대상 타입: `0x07`, `0x0b`
 
-## 테스트 시나리오
+1. `ConnMgr.readLoop()`가 frame을 읽고 `frame.ConnectionID`를 채웁니다.
+2. `tcp.Reader.handleFrame()`는 `MessageTypeRouting.IsRequestType()` / `IsResponseType()`로 분기합니다.
+3. request 타입은 `App.handleTCPRequest()` -> `FrameDispatcher.DispatchRequestFrame()` -> `HandleInboundFrame()`으로 전달됩니다.
+4. `InboundWorkerPool.process()`는 `GetInboundSubjectForMessageType(frame.Type)`로 NATS subject를 결정합니다.
+5. `GetResponseType(frame.Type)`로 TCP 응답 타입을 계산합니다.
+6. `InflightB.Register(frame.TID, TCPReplyInfo{ConnectionID, FrameType}, frame.Payload, deadline)`로 lifecycle entry를 등록합니다.
+7. `Requester.RequestWithTimeoutToSubject(subject, frame.Payload, timeout)`가 payload만 NATS로 보냅니다.
+8. 응답 성공 시 `sendTCPResponseToConnection(connectionID, tid, responseType, response)`를 호출합니다.
+9. 실패 시 같은 connection으로 `sendTCPErrorResponseToConnection(...)`를 시도합니다.
+10. 완료 후 `InflightB.Remove(connectionID, tid)`로 정리합니다.
 
-### NATS → TCP 테스트
+중요한 점:
+
+- TCP -> NATS 응답은 active connection으로 failover 하지 않습니다.
+- 요청을 받은 원래 `ConnectionID`가 READY가 아니면 응답 전송이 실패합니다.
+- `InflightB.ResponseChan`은 구조상 존재하지만 현재 `InboundWorkerPool.process()`는 동기 `RequestWithTimeoutToSubject()` 경로를 사용합니다.
+
+## 분기 규칙
+
+`tcp.Reader.handleFrame()`의 business frame 분기 규칙:
+
+- `routing.IsRequestType(frame.Type)`이면 request path
+- `routing.IsResponseType(frame.Type)`이면 response path
+- 그 외 타입은 warning log 후 drop
+
+`FrameDispatcher.DispatchRequestFrame()`는 request type인지 다시 확인한 후 inbound queue로 넘깁니다.
+
+## Inflight 매칭
+
+### InflightA
+
+- key: `tid`
+- 사용 경로: NATS -> TCP RPC
+- 검증 항목:
+  - 보낸 `ConnectionID`와 응답 `ConnectionID` 일치 여부
+  - 기대한 `ExpectedResponseType`와 실제 response type 일치 여부
+
+### InflightB
+
+- key: `connectionID:TID`
+- 사용 경로: TCP -> NATS
+- 목적: 원래 TCP connection 기준 lifecycle 추적
+
+같은 TID라도 connection이 다르면 서로 충돌하지 않습니다.
+
+## 테스트 예시
+
+NATS -> TCP:
 
 ```bash
-# 1. Subs-Change-Request (0x05) 전송
-nats req external_req '{"msg_type":"05","data":"test"}'
-
-# 2. CellInfo-Noti-Request (0x09) 전송
-nats req external_req '{"msg_type":"09","cellid":"12345"}'
+nats req tcp.subs.change '{"subscriber":"A"}'
+nats req tcp.cellinfo.noti '{"cellid":"12345"}'
 ```
 
-### TCP → NATS 테스트
+TCP -> NATS:
 
-```bash
-# 1. TCP에서 Subs-Info-Request (0x07) 전송
-# TCP Server가 다음 프레임을 전송:
-# Header: [0x00][0x07][LEN][TID]
-# Body:   {"subscriber":"test"}
-
-# 2. NATS subject 'tcp.subs.info'에서 요청 수신 확인
-nats sub tcp.subs.info
-
-# 3. 응답 전송 (payload만)
-# TCP Bridge가 0x08 타입으로 헤더 포함하여 TCP로 전송
+```text
+Header: [0x00][0x07][LEN][TID]
+Body:   {"subscriber":"A"}
 ```
 
----
+이 요청은 `tcp.subs.info` subject로 payload만 전달되고, 응답은 `0x08` frame으로 원래 connection에 기록됩니다.
 
-## 문제 해결
+## 관련 파일
 
-### NATS 응답에 헤더가 포함되는 경우
-
-**증상**: NATS 클라이언트가 헤더 데이터를 받음
-
-**원인**: `HandleOutboundRequest`에서 전체 프레임을 전송
-
-**해결**: Line 289 확인 - `responseFrame.Payload`만 전송하는지 확인
-
-### TCP 응답에 헤더가 없는 경우
-
-**증상**: TCP 서버가 JSON만 받음
-
-**원인**: `HandleInboundFrame`에서 payload만 전송
-
-**해결**: `sendTCPResponseToConnection`이 호출되는지 확인 - Frame 전체를 전송해야 함
-
----
-
-## 참고 자료
-
-- [프레임 구조](../internal/config/types.go) - `Frame` 타입 정의
-- [NATS 클라이언트](../internal/nats/client.go) - NATS 통신 로직
-- [TCP 통신](../internal/tcp/tcp.go) - TCP 송수신 로직
-- [메시지 핸들러](../internal/worker/bridge_handler.go) - 메시지 처리 로직
+- `internal/config/config.go`
+- `internal/config/types.go`
+- `internal/tcp/tcp.go`
+- `internal/worker/bridge_handler.go`
+- `internal/worker/outbound_pool.go`
+- `internal/worker/inbound_pool.go`
+- `internal/inflight/manager.go`
