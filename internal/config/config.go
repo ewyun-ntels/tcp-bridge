@@ -78,7 +78,8 @@ type TCPConfig struct {
 	BranchName       string        `yaml:"branch_name"`       // 국사명 (SS/DS/BR)
 
 	// Ping/Pong
-	PingTimeout time.Duration `yaml:"ping_timeout"` // PING 전송 후 PONG 대기 timeout
+	PingTimeout        time.Duration `yaml:"ping_timeout"`         // PING 전송 후 PONG 대기 timeout
+	PingIntervalMargin time.Duration `yaml:"ping_interval_margin"` // HELLO ACK의 ping-interval에서 차감할 안전 마진
 }
 
 // TCPEndpoint represents a TCP connection endpoint

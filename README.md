@@ -71,6 +71,7 @@ tcp:
   frame_header_size: 8
   handshake_timeout: "10s"
   ping_timeout: "5s"
+  ping_interval_margin: "0s"
   sys_id: "tcp-bridge-01"
   branch_name: "SS"
 
@@ -170,6 +171,7 @@ ACK payload:
 
 - `code == 200`일 때 handshake 성공으로 간주합니다.
 - `ping-interval`이 0보다 크면 READY 상태에서 `pingLoop()`가 idle 기반 ping/pong 감시를 수행합니다.
+- `tcp.ping_interval_margin`이 0보다 크면 ACK의 `ping-interval`에서 그 값만큼 차감한 시점에 PING을 전송합니다.
 - PONG 미수신 또는 ping write 실패 시 연결은 `DISCONNECTED`로 내려갑니다.
 
 ## 메트릭

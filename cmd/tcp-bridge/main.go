@@ -269,7 +269,11 @@ func (a *App) handleTCPResponse(frame *config.Frame) {
 
 	// Match with inflight-A entries (NATS→TCP responses)
 	if handled := a.inflightMgr.GetInflightA().HandleResponse(frame); !handled {
-		a.logger.Warn("no inflight-A entry found for TCP response", "tid", frame.TID)
+		a.logger.Warn("dropping unmatched TCP response",
+			"tid", frame.TID,
+			"connection_id", frame.ConnectionID,
+			"response_type", fmt.Sprintf("0x%02x", frame.Type),
+			"payload_size", len(frame.Payload))
 	}
 }
 

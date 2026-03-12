@@ -560,10 +560,20 @@ func (c *ConnMgr) performHandshake() error {
 
 	// Store ping interval if provided
 	if ackResp.PingInterval > 0 {
+		rawInterval := time.Duration(ackResp.PingInterval) * time.Second
+		effectiveInterval := rawInterval - c.config.PingIntervalMargin
+		if effectiveInterval <= 0 {
+			effectiveInterval = time.Second
+		}
+
 		c.mu.Lock()
-		c.pingInterval = time.Duration(ackResp.PingInterval) * time.Second
+		c.pingInterval = effectiveInterval
 		c.mu.Unlock()
-		c.logger.Info("received ping interval", "interval", ackResp.PingInterval, "seconds", ackResp.PingInterval)
+		c.logger.Info("received ping interval",
+			"interval", ackResp.PingInterval,
+			"seconds", ackResp.PingInterval,
+			"margin", c.config.PingIntervalMargin.String(),
+			"effective_interval", effectiveInterval.String())
 	}
 
 	// Clear read/write deadlines after handshake (ping-pong will manage connection health)

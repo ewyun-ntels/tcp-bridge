@@ -66,7 +66,7 @@ nats:
 
 - 구독 subject는 단일 `external_req`가 아니라 `message_type_routing.outbound[*].subject` 목록입니다.
 - request 타입은 payload에서 추출하지 않고 NATS subject에서 역으로 결정합니다.
-- RPC가 아닌 fire-and-forget 메시지는 `msg.Reply == ""`로 구분합니다.
+- outbound 메시지는 request/response 전용으로 처리하며, `msg.Reply == ""`인 메시지는 브릿지에서 거부합니다.
 
 ## TCP -> NATS 흐름
 

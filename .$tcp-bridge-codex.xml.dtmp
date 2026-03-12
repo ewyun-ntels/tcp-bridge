@@ -500,9 +500,6 @@
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-1" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=20;fontStyle=1" value="tcp-bridge runtime flow (synced to current source)" vertex="1">
-          <mxGeometry height="30" width="700" x="160" y="870" as="geometry" />
-        </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f0fe;strokeColor=#5b8def;fontStyle=1" value="A. NATS -&gt; TCP" vertex="1">
           <mxGeometry height="860" width="880" x="160" y="930" as="geometry" />
         </mxCell>

@@ -25,6 +25,7 @@ tcp:
   frame_header_size: 8
   handshake_timeout: "10s"
   ping_timeout: "5s"           # PING 전송 후 PONG 대기 timeout
+  ping_interval_margin: "0s"   # HELLO ACK의 ping-interval에서 차감할 안전 마진 (예: "5s")
   
   # Handshake credentials
   sys_id: "tcp-bridge-01"      # 접속하는 Peer Name

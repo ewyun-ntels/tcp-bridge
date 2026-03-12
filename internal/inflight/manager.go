@@ -283,7 +283,11 @@ func (ia *InflightA) HandleResponse(frame *config.Frame) bool {
 	ia.mu.Unlock()
 
 	if !exists {
-		ia.logger.Warn("no inflight-a entry found for response", "tid", frame.TID)
+		ia.logger.Warn("no inflight-a entry found for response",
+			"tid", frame.TID,
+			"connection_id", frame.ConnectionID,
+			"response_type", fmt.Sprintf("0x%02x", frame.Type),
+			"payload_size", len(frame.Payload))
 		return false
 	}
 

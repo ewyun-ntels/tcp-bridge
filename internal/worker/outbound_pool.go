@@ -65,8 +65,15 @@ func (p *OutboundWorkerPool) process(msg *nats.Msg) {
 	logger := p.logger.With("subject", msg.Subject, "reply", msg.Reply)
 	logger.Debug("processing external request")
 
+	if msg.Reply == "" {
+		logger.Error(
+			"rejecting outbound message without reply subject",
+			"subject", msg.Subject,
+			"size", len(msg.Data))
+		return
+	}
+
 	tid := tid.Next()
-	isRPC := msg.Reply != ""
 	msgType, expectedRespType, ok := p.handler.resolveOutboundRoute(msg.Subject)
 	if !ok {
 		logger.Error("unknown NATS subject for NATS->TCP flow", "subject", msg.Subject)
@@ -80,37 +87,32 @@ func (p *OutboundWorkerPool) process(msg *nats.Msg) {
 		Payload: msg.Data,
 	}
 
-	var inflightEntry *inflight.InflightEntryA
-	if isRPC {
-		retryAttempts := p.config.RetryAttempts
-		responseTimeout := p.config.ResponseTimeout
-		priorityCount := len(p.handler.connMgr.GetConnections())
-		totalTimeout := time.Duration(retryAttempts*priorityCount)*responseTimeout + 10*time.Second
-		deadline := time.Now().Add(totalTimeout).Unix()
+	retryAttempts := p.config.RetryAttempts
+	responseTimeout := p.config.ResponseTimeout
+	priorityCount := len(p.handler.connMgr.GetConnections())
+	totalTimeout := time.Duration(retryAttempts*priorityCount)*responseTimeout + 10*time.Second
+	deadline := time.Now().Add(totalTimeout).Unix()
 
-		inflightEntry = p.handler.inflightMgr.GetInflightA().Register(
-			tid,
-			msg.Reply,
-			msg.Subject,
-			msgType,
-			expectedRespType,
-			deadline,
-		)
-		logger.Debug("registered inflight-A entry",
-			"tid", tid,
-			"subject", msg.Subject,
-			"msg_type", fmt.Sprintf("0x%02x", msgType),
-			"expected_response_type", fmt.Sprintf("0x%02x", expectedRespType),
-			"deadline_seconds", totalTimeout.Seconds())
-	}
+	inflightEntry := p.handler.inflightMgr.GetInflightA().Register(
+		tid,
+		msg.Reply,
+		msg.Subject,
+		msgType,
+		expectedRespType,
+		deadline,
+	)
+	logger.Debug("registered inflight-A entry",
+		"tid", tid,
+		"subject", msg.Subject,
+		"msg_type", fmt.Sprintf("0x%02x", msgType),
+		"expected_response_type", fmt.Sprintf("0x%02x", expectedRespType),
+		"deadline_seconds", totalTimeout.Seconds())
 
-	success := p.sendAndWaitWithRetry(frame, inflightEntry, isRPC, logger)
+	success := p.sendAndWaitWithRetry(frame, inflightEntry, logger)
 	if !success {
 		logger.Error("all connection attempts failed", "tid", tid)
-		if isRPC {
-			p.handler.inflightMgr.GetInflightA().Remove(tid)
-			p.handler.replyError(msg, "all TCP connections failed or timeout")
-		}
+		p.handler.inflightMgr.GetInflightA().Remove(tid)
+		p.handler.replyError(msg, "all TCP connections failed or timeout")
 		return
 	}
 
@@ -120,12 +122,12 @@ func (p *OutboundWorkerPool) process(msg *nats.Msg) {
 func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 	frame *config.Frame,
 	inflightEntry *inflight.InflightEntryA,
-	isRPC bool,
 	logger *slog.Logger,
 ) bool {
 	connections := p.handler.connMgr.GetConnections()
 	retryAttempts := p.config.RetryAttempts
 	responseTimeout := p.config.ResponseTimeout
+	startedAt := time.Now()
 
 	for priority := 0; priority < len(connections); priority++ {
 		conn := connections[priority]
@@ -142,6 +144,15 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 		}
 
 		for attempt := 1; attempt <= retryAttempts; attempt++ {
+			logger.Info("attempting TCP send",
+				"tid", frame.TID,
+				"msg_type", fmt.Sprintf("0x%02x", frame.Type),
+				"connection_id", conn.ID(),
+				"priority", priority,
+				"attempt", attempt,
+				"payload_size", len(frame.Payload),
+				"elapsed_ms", time.Since(startedAt).Milliseconds())
+
 			data, err := frame.Serialize()
 			if err != nil {
 				logger.Error("failed to serialize frame", "tid", frame.TID, "error", err)
@@ -179,10 +190,6 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 				p.handler.inflightMgr.GetInflightA().SetConnectionID(frame.TID, conn.ID())
 			}
 
-			if !isRPC {
-				return true
-			}
-
 			select {
 			case responseFrame := <-inflightEntry.ResponseChan:
 				logger.Info("received TCP response",
@@ -205,17 +212,31 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 			case <-time.After(responseTimeout):
 				logger.Warn("response timeout, retrying",
 					"tid", frame.TID,
+					"msg_type", fmt.Sprintf("0x%02x", frame.Type),
+					"connection_id", conn.ID(),
 					"priority", priority,
 					"attempt", attempt,
-					"response_timeout", responseTimeout)
+					"response_timeout", responseTimeout,
+					"elapsed_ms", time.Since(startedAt).Milliseconds())
 				continue
 			}
 		}
 
+		nextPriority := -1
+		for i := priority + 1; i < len(connections); i++ {
+			if connections[i] != nil {
+				nextPriority = i
+				break
+			}
+		}
 		logger.Warn("all attempts failed for priority, trying next",
 			"tid", frame.TID,
 			"failed_priority", priority,
-			"attempts", retryAttempts)
+			"connection_id", conn.ID(),
+			"attempts", retryAttempts,
+			"next_priority", nextPriority,
+			"will_retry_on_other_connection", nextPriority >= 0,
+			"elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
 
 	return false
