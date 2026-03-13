@@ -10,13 +10,15 @@ import (
 	"tcp-bridge/internal/config"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // Metrics holds all prometheus metrics
 type Metrics struct {
-	logger *slog.Logger
-	config *config.MetricsConfig
+	logger   *slog.Logger
+	config   *config.MetricsConfig
+	registry *prometheus.Registry
 
 	// Connection metrics
 	connectionState              *prometheus.GaugeVec
@@ -107,6 +109,8 @@ func (m *Metrics) SetKeyListProvider(provider func() []json.RawMessage) {
 
 // initMetrics initializes all prometheus metrics
 func (m *Metrics) initMetrics() {
+	m.registry = prometheus.NewRegistry()
+
 	// Connection metrics
 	m.connectionState = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -118,8 +122,8 @@ func (m *Metrics) initMetrics() {
 
 	m.activeConnection = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
-			Name: "tcp_bridge_active_connection",
-			Help: "Whether the connection is currently selected as active (1=active, 0=inactive)",
+			Name: "tcp_bridge_selected_connection",
+			Help: "Whether the connection is currently selected as primary/master (1=selected, 0=not selected)",
 		},
 		[]string{"connection_id"},
 	)
@@ -495,8 +499,15 @@ func (m *Metrics) initMetrics() {
 		},
 	)
 
-	// Register all metrics
-	prometheus.MustRegister(
+	if m.config.IncludeDefaultMetrics {
+		m.registry.MustRegister(
+			collectors.NewGoCollector(),
+			collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		)
+	}
+
+	// Register all application metrics
+	m.registry.MustRegister(
 		m.connectionState,
 		m.activeConnection,
 		m.connectionAttemptsTotal,
@@ -555,7 +566,7 @@ func (m *Metrics) Start() error {
 	}
 
 	mux := http.NewServeMux()
-	mux.Handle(m.config.Path, promhttp.Handler())
+	mux.Handle(m.config.Path, promhttp.HandlerFor(m.registry, promhttp.HandlerOpts{}))
 
 	// Health check endpoint
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

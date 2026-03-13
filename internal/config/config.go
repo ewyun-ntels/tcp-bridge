@@ -16,7 +16,7 @@ import (
 // - nats: NATS 설정 (URL, subject, routing, timeout)
 // - message_handler: NATS↔TCP 메시지 처리 설정 (timeout, retry)
 // - queue: 전송 큐 설정 (현재 미사용, 향후 확장 대비)
-// - metrics: Prometheus 메트릭 설정 (HTTP 포트, 경로)
+// - metrics: Prometheus 메트릭 설정 (HTTP 포트, 경로, 기본 runtime 메트릭 포함 여부)
 // - logging: 로그 레벨 설정 (debug/info/warn/error)
 type Config struct {
 	Server         ServerConfig         `yaml:"server"`
@@ -233,9 +233,10 @@ type QueueConfig struct {
 
 // MetricsConfig contains metrics configuration
 type MetricsConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Port    int    `yaml:"port"`
-	Path    string `yaml:"path"`
+	Enabled               bool   `yaml:"enabled"`
+	Port                  int    `yaml:"port"`
+	Path                  string `yaml:"path"`
+	IncludeDefaultMetrics bool   `yaml:"include_default_metrics"`
 }
 
 // LoggingConfig contains logging configuration

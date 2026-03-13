@@ -110,6 +110,7 @@ metrics:
   enabled: true
   port: 8080
   path: "/metrics"
+  include_default_metrics: false
 
 logging:
   level: "debug"

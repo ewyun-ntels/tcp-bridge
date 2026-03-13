@@ -22,13 +22,13 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
   - `1`: connecting
   - `2`: ready
 
-### `tcp_bridge_active_connection`
+### `tcp_bridge_selected_connection`
 - Type: `gauge`
 - Labels: `connection_id`
-- Meaning: 현재 active connection 여부입니다.
+- Meaning: 현재 primary/master 로 선택된 connection 여부입니다.
 - Values:
-  - `1`: active
-  - `0`: inactive
+  - `1`: selected
+  - `0`: not selected
 
 ### `tcp_bridge_connection_attempts_total`
 - Type: `counter`
@@ -77,7 +77,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 ### `tcp_bridge_failover_total`
 - Type: `counter`
 - Labels: `from`, `to`, `reason`
-- Meaning: active connection 변경 총 횟수입니다.
+- Meaning: selected connection 변경 총 횟수입니다.
 - Common `reason` values:
   - `selected`
   - `failover`
@@ -87,7 +87,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ## Connection Operational Notes
 
-- `connection_state` 와 `active_connection` 을 같이 보면 active 회선과 백업 회선을 구분할 수 있습니다.
+- `connection_state` 와 `selected_connection` 을 같이 보면 현재 선택된 primary/master 회선과 standby 회선을 구분할 수 있습니다.
 - `connection_attempts_total - connection_success_total` 차이가 계속 커지면 연결 자체가 불안정한 상태일 가능성이 큽니다.
 - `disconnects_total{reason="ping_timeout"}` 이 증가하면 peer 응답 정지 또는 네트워크 단절 가능성을 먼저 확인하는 편이 좋습니다.
 - `failover_total` 이 짧은 시간에 반복 증가하면 active 회선 flap 상황일 수 있습니다.
