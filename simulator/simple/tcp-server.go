@@ -152,9 +152,13 @@ func performHandshake(state *connectionState) error {
 	}
 
 	fmt.Printf("[%s] received HELLO tid=%d sys-id=%s branch-name=%s\n", ts(), helloFrame.TID, hello.SysID, hello.BranchName)
+	sysID := *listenPort
+	if addr, ok := state.conn.LocalAddr().(*net.TCPAddr); ok && addr.Port > 0 {
+		sysID = fmt.Sprintf("%d", addr.Port)
+	}
 
 	ackPayload, err := json.Marshal(handshakeResponse{
-		SysID:        "tcp-server-01",
+		SysID:        sysID,
 		Code:         200,
 		PingInterval: 30,
 		KeyList: []keyListEntry{
