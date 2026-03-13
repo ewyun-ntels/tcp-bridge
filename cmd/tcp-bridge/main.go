@@ -140,9 +140,19 @@ func (a *App) initializeComponents() {
 	a.metrics.SetKeyListProvider(a.connMgr.ListHandshakeResponses)
 
 	// Set connection state change callback for metrics
-	a.connMgr.SetStateChangeCallback(func(connType string, state string) {
-		a.metrics.SetConnectionState(connType, state)
+	a.connMgr.SetStateChangeCallback(func(connID string, endpoint string, state string) {
+		a.metrics.SetConnectionState(connID, endpoint, state)
 	})
+	a.connMgr.SetConnectAttemptCallback(a.metrics.IncConnectionAttempts)
+	a.connMgr.SetConnectSuccessCallback(a.metrics.IncConnectionSuccess)
+	a.connMgr.SetConnectFailureCallback(a.metrics.IncConnectionFailure)
+	a.connMgr.SetDisconnectCallback(a.metrics.IncDisconnect)
+	a.connMgr.SetPingRTTCallback(a.metrics.ObservePingRTT)
+	a.connMgr.SetActiveConnectionChangeCallback(func(from string, to string, reason string) {
+		a.metrics.IncFailover(from, to, reason)
+		a.metrics.SetActiveConnection(connectionIDs(a.connMgr.GetConnections()), normalizeActiveConnectionID(to))
+	})
+	a.metrics.SetActiveConnection(connectionIDs(a.connMgr.GetConnections()), "")
 
 	// Create NATS client
 	a.natsClient = nats.NewClient(a.logger.With("component", "nats"), &a.config.NATS)
@@ -169,6 +179,7 @@ func (a *App) initializeComponents() {
 		a.tcpSender,
 		a.inflightMgr,
 		a.connMgr, // Priority 기반 재시도용
+		a.metrics,
 	)
 
 	// Create frame dispatcher
@@ -252,9 +263,13 @@ func (a *App) Stop(ctx context.Context) error {
 // handleTCPRequest handles incoming TCP request frames
 func (a *App) handleTCPRequest(frame *config.Frame) {
 	a.logger.Debug("handling TCP request", "tid", frame.TID)
+	frame.ReceivedAt = time.Now()
 
 	// Update metrics
 	a.metrics.IncTCPFramesReceived("request")
+	msgType := fmt.Sprintf("0x%02x", frame.Type)
+	a.metrics.IncInboundRequests(msgType)
+	a.metrics.AddInboundInflight(msgType, 1)
 
 	// Dispatch to bridge handler via frame dispatcher
 	a.frameDispatcher.DispatchRequestFrame(frame)
@@ -269,6 +284,7 @@ func (a *App) handleTCPResponse(frame *config.Frame) {
 
 	// Match with inflight-A entries (NATS→TCP responses)
 	if handled := a.inflightMgr.GetInflightA().HandleResponse(frame); !handled {
+		a.metrics.IncOutboundUnmatchedResponse(fmt.Sprintf("0x%02x", frame.Type))
 		a.logger.Warn("dropping unmatched TCP response",
 			"tid", frame.TID,
 			"connection_id", frame.ConnectionID,
@@ -283,8 +299,30 @@ func (a *App) collectMetrics() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		// Other metrics can be added here as needed
+		for _, conn := range a.connMgr.GetConnections() {
+			if conn == nil {
+				continue
+			}
+			a.metrics.SetLastActivityTimestamp(conn.ID(), conn.GetLastActivityTime())
+		}
 	}
+}
+
+func connectionIDs(connections []*connection.ConnMgr) []string {
+	ids := make([]string, 0, len(connections))
+	for _, conn := range connections {
+		if conn != nil {
+			ids = append(ids, conn.ID())
+		}
+	}
+	return ids
+}
+
+func normalizeActiveConnectionID(connectionID string) string {
+	if connectionID == "" || connectionID == "nil" {
+		return ""
+	}
+	return connectionID
 }
 
 // setupLogger creates a structured logger

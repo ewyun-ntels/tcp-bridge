@@ -54,8 +54,9 @@ type InflightA struct {
 type InflightB struct {
 	logger *slog.Logger
 
-	mu      sync.RWMutex
-	entries map[string]*InflightEntryB // key: "connectionID:TID"
+	mu       sync.RWMutex
+	entries  map[string]*InflightEntryB // key: "connectionID:TID"
+	onExpire func(entry *InflightEntryB)
 
 	// Cleanup
 	cleanupInterval time.Duration
@@ -78,16 +79,16 @@ type InflightEntryA struct {
 	ResponseChan chan *config.Frame // Channel to receive response
 }
 
-// InflightEntryB represents a TCP→NATS inflight entry
+// InflightEntryB represents a TCP→NATS inflight entry.
+//
+// 현재 inbound 경로는 NATS request/reply를 동기 호출로 처리하므로
+// 이 구조체는 원래 TCP connection 기준 lifecycle 추적용 메타데이터만 보관합니다.
 type InflightEntryB struct {
 	TID          uint32        // Transaction ID
+	RequestType  uint8         // Original inbound TCP request type
 	TCPReplyInfo *TCPReplyInfo // TCP reply information
 	Payload      []byte        // Request payload
 	Deadline     int64         // Request deadline (unix timestamp)
-
-	// Response handling
-	ResponseChan chan []byte   // Channel to receive NATS response
-	TimeoutChan  chan struct{} // Channel for timeout notification
 }
 
 // TCPReplyInfo contains information needed to reply via TCP
@@ -394,9 +395,7 @@ func (ib *InflightB) Stop() {
 
 	// Clean up all entries
 	ib.mu.Lock()
-	for key, entry := range ib.entries {
-		close(entry.ResponseChan)
-		close(entry.TimeoutChan)
+	for key := range ib.entries {
 		delete(ib.entries, key)
 	}
 	ib.mu.Unlock()
@@ -411,14 +410,13 @@ func (ib *InflightB) Stop() {
 }
 
 // Register registers a new TCP→NATS request (ALWAYS for TCP inbound)
-func (ib *InflightB) Register(tid uint32, tcpReplyInfo *TCPReplyInfo, payload []byte, deadline int64) *InflightEntryB {
+func (ib *InflightB) Register(tid uint32, requestType uint8, tcpReplyInfo *TCPReplyInfo, payload []byte, deadline int64) *InflightEntryB {
 	entry := &InflightEntryB{
 		TID:          tid,
+		RequestType:  requestType,
 		TCPReplyInfo: tcpReplyInfo,
 		Payload:      payload,
 		Deadline:     deadline,
-		ResponseChan: make(chan []byte, 1),
-		TimeoutChan:  make(chan struct{}, 1),
 	}
 
 	key := fmt.Sprintf("%s:%d", tcpReplyInfo.ConnectionID, tid)
@@ -434,38 +432,8 @@ func (ib *InflightB) Register(tid uint32, tcpReplyInfo *TCPReplyInfo, payload []
 	return entry
 }
 
-// HandleResponse handles a NATS response for a TCP→NATS request
-func (ib *InflightB) HandleResponse(connectionID string, tid uint32, response []byte) bool {
-	key := fmt.Sprintf("%s:%d", connectionID, tid)
-
-	ib.mu.Lock()
-	entry, exists := ib.entries[key]
-	if exists {
-		delete(ib.entries, key)
-	}
-	ib.mu.Unlock()
-
-	if !exists {
-		ib.logger.Warn("no inflight-b entry found for response",
-			"connection_id", connectionID,
-			"tid", tid,
-			"key", key)
-		return false
-	}
-
-	// Send response to waiting goroutine
-	select {
-	case entry.ResponseChan <- response:
-		ib.logger.Debug("response delivered to inflight-b entry",
-			"connection_id", connectionID,
-			"tid", tid)
-	default:
-		ib.logger.Warn("response channel full for inflight-b entry",
-			"connection_id", connectionID,
-			"tid", tid)
-	}
-
-	return true
+func (ib *InflightB) SetExpireCallback(callback func(entry *InflightEntryB)) {
+	ib.onExpire = callback
 }
 
 // Remove removes an inflight entry
@@ -503,12 +471,14 @@ func (ib *InflightB) cleanupLoop() {
 // cleanupExpired removes expired entries
 func (ib *InflightB) cleanupExpired() {
 	now := time.Now().Unix()
+	var expiredEntries []*InflightEntryB
 	var expiredKeys []string
 
 	ib.mu.RLock()
 	for key, entry := range ib.entries {
 		if entry.Deadline < now {
 			expiredKeys = append(expiredKeys, key)
+			expiredEntries = append(expiredEntries, entry)
 		}
 	}
 	ib.mu.RUnlock()
@@ -516,17 +486,17 @@ func (ib *InflightB) cleanupExpired() {
 	if len(expiredKeys) > 0 {
 		ib.mu.Lock()
 		for _, key := range expiredKeys {
-			if entry, exists := ib.entries[key]; exists {
-				// Notify timeout
-				select {
-				case entry.TimeoutChan <- struct{}{}:
-				default:
-				}
+			if _, exists := ib.entries[key]; exists {
 				delete(ib.entries, key)
 			}
 		}
 		ib.mu.Unlock()
 
 		ib.logger.Info("cleaned up expired inflight-b entries", "count", len(expiredKeys))
+		if ib.onExpire != nil {
+			for _, entry := range expiredEntries {
+				ib.onExpire(entry)
+			}
+		}
 	}
 }

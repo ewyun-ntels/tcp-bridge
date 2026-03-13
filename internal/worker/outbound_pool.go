@@ -1,8 +1,8 @@
 package worker
 
 import (
-	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"tcp-bridge/internal/config"
@@ -17,19 +17,30 @@ type OutboundWorkerPool struct {
 	handler *BridgeHandler
 	logger  *slog.Logger
 	config  *config.MessageHandlerPoolConfig
-	jobs    chan *nats.Msg
+	jobs    chan *outboundJob
+}
+
+type outboundJob struct {
+	msg        *nats.Msg
+	receivedAt time.Time
+	enqueuedAt time.Time
 }
 
 func (p *OutboundWorkerPool) Start() {
-	p.jobs = make(chan *nats.Msg, p.config.QueueSize)
+	p.jobs = make(chan *outboundJob, p.config.QueueSize)
 	p.startWorkers(p.config.WorkerCount)
 }
 
 func (p *OutboundWorkerPool) Enqueue(msg *nats.Msg) bool {
+	job := &outboundJob{
+		msg:        msg,
+		receivedAt: time.Now(),
+		enqueuedAt: time.Now(),
+	}
 	select {
 	case <-p.handler.ctx.Done():
 		return false
-	case p.jobs <- msg:
+	case p.jobs <- job:
 		return true
 	default:
 		p.logger.Warn("queue is full", "queue_size", cap(p.jobs))
@@ -53,17 +64,33 @@ func (p *OutboundWorkerPool) workerLoop(workerID int) {
 		select {
 		case <-p.handler.ctx.Done():
 			return
-		case msg := <-p.jobs:
-			if msg != nil {
-				p.process(msg)
+		case job := <-p.jobs:
+			if job != nil {
+				p.process(job)
 			}
 		}
 	}
 }
 
-func (p *OutboundWorkerPool) process(msg *nats.Msg) {
+func (p *OutboundWorkerPool) process(job *outboundJob) {
+	msg := job.msg
 	logger := p.logger.With("subject", msg.Subject, "reply", msg.Reply)
 	logger.Debug("processing external request")
+	if !job.enqueuedAt.IsZero() {
+		p.handler.metrics.ObserveOutboundQueueWaitDuration(time.Since(job.enqueuedAt))
+	}
+	finalStatus := "error"
+	subject := msg.Subject
+	msgTypeLabel := "unknown"
+	defer func() {
+		p.handler.metrics.IncOutboundWorkerTasks(finalStatus)
+		if msgTypeLabel != "unknown" {
+			p.handler.metrics.AddOutboundInflight(subject, msgTypeLabel, -1)
+		}
+		if !job.receivedAt.IsZero() {
+			p.handler.metrics.ObserveOutboundEndToEndDuration(subject, msgTypeLabel, finalStatus, time.Since(job.receivedAt))
+		}
+	}()
 
 	if msg.Reply == "" {
 		logger.Error(
@@ -77,9 +104,16 @@ func (p *OutboundWorkerPool) process(msg *nats.Msg) {
 	msgType, expectedRespType, ok := p.handler.resolveOutboundRoute(msg.Subject)
 	if !ok {
 		logger.Error("unknown NATS subject for NATS->TCP flow", "subject", msg.Subject)
+		p.handler.metrics.IncOutboundErrors(subject, msgTypeLabel, "unknown_subject")
+		p.handler.metrics.IncOutboundRequests(subject, msgTypeLabel)
+		p.handler.metrics.IncOutboundResponses(subject, msgTypeLabel, "dropped")
+		finalStatus = "dropped"
 		p.handler.replyError(msg, "unknown NATS subject")
 		return
 	}
+	msgTypeLabel = formatMsgType(msgType)
+	p.handler.metrics.IncOutboundRequests(subject, msgTypeLabel)
+	p.handler.metrics.AddOutboundInflight(subject, msgTypeLabel, 1)
 
 	frame := &config.Frame{
 		Type:    msgType,
@@ -104,18 +138,29 @@ func (p *OutboundWorkerPool) process(msg *nats.Msg) {
 	logger.Debug("registered inflight-A entry",
 		"tid", tid,
 		"subject", msg.Subject,
-		"msg_type", fmt.Sprintf("0x%02x", msgType),
-		"expected_response_type", fmt.Sprintf("0x%02x", expectedRespType),
+		"msg_type", msgTypeLabel,
+		"expected_response_type", formatMsgType(expectedRespType),
 		"deadline_seconds", totalTimeout.Seconds())
 
-	success := p.sendAndWaitWithRetry(frame, inflightEntry, logger)
+	success, status, errorType := p.sendAndWaitWithRetry(frame, inflightEntry, logger)
 	if !success {
 		logger.Error("all connection attempts failed", "tid", tid)
 		p.handler.inflightMgr.GetInflightA().Remove(tid)
+		p.handler.metrics.IncOutboundResponses(subject, msgTypeLabel, status)
+		finalStatus = status
+		if errorType != "" {
+			p.handler.metrics.IncOutboundErrors(subject, msgTypeLabel, errorType)
+		}
+		if status == "timeout" {
+			p.handler.metrics.IncOutboundTimeout(subject, msgTypeLabel, "tcp_wait")
+			p.handler.metrics.IncOutboundTimeout(subject, msgTypeLabel, "overall")
+		}
 		p.handler.replyError(msg, "all TCP connections failed or timeout")
 		return
 	}
 
+	p.handler.metrics.IncOutboundResponses(subject, msgTypeLabel, "success")
+	finalStatus = "success"
 	logger.Debug("request processed successfully", "tid", tid)
 }
 
@@ -123,11 +168,16 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 	frame *config.Frame,
 	inflightEntry *inflight.InflightEntryA,
 	logger *slog.Logger,
-) bool {
+) (bool, string, string) {
 	connections := p.handler.connMgr.GetConnections()
 	retryAttempts := p.config.RetryAttempts
 	responseTimeout := p.config.ResponseTimeout
 	startedAt := time.Now()
+	subject := inflightEntry.Subject
+	msgTypeLabel := formatMsgType(frame.Type)
+	lastErrorType := ""
+	timedOut := false
+	readyConnectionSeen := false
 
 	for priority := 0; priority < len(connections); priority++ {
 		conn := connections[priority]
@@ -136,17 +186,19 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 		}
 
 		if conn.GetState() != config.ConnStateReady {
+			lastErrorType = "no_ready_connection"
 			logger.Debug("connection not ready, skipping to next priority",
 				"tid", frame.TID,
 				"priority", priority,
 				"state", conn.GetState())
 			continue
 		}
+		readyConnectionSeen = true
 
 		for attempt := 1; attempt <= retryAttempts; attempt++ {
 			logger.Info("attempting TCP send",
 				"tid", frame.TID,
-				"msg_type", fmt.Sprintf("0x%02x", frame.Type),
+				"msg_type", msgTypeLabel,
 				"connection_id", conn.ID(),
 				"priority", priority,
 				"attempt", attempt,
@@ -156,11 +208,12 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 			data, err := frame.Serialize()
 			if err != nil {
 				logger.Error("failed to serialize frame", "tid", frame.TID, "error", err)
-				return false
+				return false, "error", "serialize_error"
 			}
 
 			bytesWritten, err := conn.Write(data)
 			if err != nil {
+				lastErrorType = classifyOutboundWriteError(err)
 				logger.Warn("TCP send failed",
 					"tid", frame.TID,
 					"priority", priority,
@@ -170,6 +223,7 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 			}
 
 			if bytesWritten != len(data) {
+				lastErrorType = "incomplete_write"
 				logger.Error("incomplete write",
 					"tid", frame.TID,
 					"priority", priority,
@@ -192,27 +246,32 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 
 			select {
 			case responseFrame := <-inflightEntry.ResponseChan:
+				p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(subject, msgTypeLabel, "success", time.Since(startedAt))
 				logger.Info("received TCP response",
 					"tid", frame.TID,
 					"connection_id", responseFrame.ConnectionID,
 					"priority", priority,
 					"attempt", attempt,
-					"response_type", fmt.Sprintf("0x%02x", responseFrame.Type),
+					"response_type", formatMsgType(responseFrame.Type),
 					"response_size", len(responseFrame.Payload))
 
 				replyPublisher := p.handler.natsClient.GetReplyPublisher()
+				replyStartedAt := time.Now()
 				if err := replyPublisher.PublishReply(inflightEntry.ReplySubject, responseFrame.Payload); err != nil {
+					p.handler.metrics.ObserveOutboundNATSReplyDuration(subject, msgTypeLabel, "error", time.Since(replyStartedAt))
 					logger.Error("failed to send NATS reply", "tid", frame.TID, "error", err)
-					return false
+					return false, "error", "reply_publish_error"
 				}
+				p.handler.metrics.ObserveOutboundNATSReplyDuration(subject, msgTypeLabel, "success", time.Since(replyStartedAt))
 
 				logger.Debug("sent NATS reply (payload only)", "tid", frame.TID, "size", len(responseFrame.Payload))
-				return true
+				return true, "success", ""
 
 			case <-time.After(responseTimeout):
+				timedOut = true
 				logger.Warn("response timeout, retrying",
 					"tid", frame.TID,
-					"msg_type", fmt.Sprintf("0x%02x", frame.Type),
+					"msg_type", msgTypeLabel,
 					"connection_id", conn.ID(),
 					"priority", priority,
 					"attempt", attempt,
@@ -239,5 +298,29 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 			"elapsed_ms", time.Since(startedAt).Milliseconds())
 	}
 
-	return false
+	if timedOut {
+		p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(subject, msgTypeLabel, "timeout", time.Since(startedAt))
+		return false, "timeout", "tcp_response_timeout"
+	}
+	if !readyConnectionSeen && lastErrorType == "" {
+		lastErrorType = "no_ready_connection"
+	}
+	if lastErrorType == "" {
+		lastErrorType = "tcp_write_error"
+	}
+	p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(subject, msgTypeLabel, "error", time.Since(startedAt))
+	return false, "error", lastErrorType
+}
+
+func classifyOutboundWriteError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errMsg := err.Error()
+	switch {
+	case strings.Contains(errMsg, "no ready connection available"):
+		return "no_ready_connection"
+	default:
+		return "tcp_write_error"
+	}
 }

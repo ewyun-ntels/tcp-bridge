@@ -31,8 +31,14 @@ type ConnectionManager struct {
 	// 활성 연결을 선택하고 관리하는 selector
 	selector *PriorityConnSelector
 
-	// 연결 상태 변경 시 호출되는 콜백 (메트릭 수집 등에 사용)
-	onStateChange func(connType string, state string)
+	// 연결 상태 및 품질 변경 시 호출되는 콜백 (메트릭 수집 등에 사용)
+	onStateChange      func(connID string, endpoint string, state string)
+	onConnectAttempt   func(connID string)
+	onConnectSuccess   func(connID string)
+	onConnectFailure   func(connID string, reason string)
+	onDisconnect       func(connID string, reason string)
+	onPingRTT          func(connID string, duration time.Duration)
+	onActiveConnChange func(from string, to string, reason string)
 }
 
 // ConnMgr는 단일 TCP 연결을 상태 머신(state machine)과 함께 관리합니다.
@@ -65,11 +71,18 @@ type ConnMgr struct {
 	activityMu       sync.Mutex
 	lastActivityTime time.Time // 마지막 메시지 송수신 시간
 	awaitingPong     bool      // PONG 대기 중 플래그
+	lastPingSentAt   time.Time
+	disconnectReason string
 
 	// Callbacks (lock 없이 호출됨 - deadlock 주의!)
 	onStateChange       func(state string)
 	onFrameRead         func(frame *config.Frame)
 	onHandshakeResponse func(sysID string, payload json.RawMessage)
+	onConnectAttempt    func()
+	onConnectSuccess    func()
+	onConnectFailure    func(reason string)
+	onDisconnect        func(reason string)
+	onPingRTT           func(duration time.Duration)
 }
 
 // ID returns the stable connection identifier.
@@ -88,6 +101,7 @@ type PriorityConnSelector struct {
 	connections    []*ConnMgr // 우선순위 순서로 정렬된 연결 목록
 	active         *ConnMgr   // 현재 활성 연결
 	activePriority int        // 현재 활성 연결의 우선순위 (-1은 활성 연결 없음)
+	onActiveChange func(from string, to string, reason string)
 }
 
 // NewConnectionManager는 새로운 연결 관리자를 생성합니다.
@@ -126,15 +140,45 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 		// 상태가 변경되면 메트릭을 업데이트하고, selector를 재평가합니다.
 		conn.onStateChange = func(state string) {
 			if cm.onStateChange != nil {
-				cm.onStateChange(connID, state)
+				cm.onStateChange(connID, endpoint.Address(), state)
 			}
 			// 활성 연결 재선택 (더 높은 우선순위 연결이 READY 상태가 되었을 수 있음)
 			cm.selector.ReEvaluate()
+		}
+		conn.onConnectAttempt = func() {
+			if cm.onConnectAttempt != nil {
+				cm.onConnectAttempt(connID)
+			}
+		}
+		conn.onConnectSuccess = func() {
+			if cm.onConnectSuccess != nil {
+				cm.onConnectSuccess(connID)
+			}
+		}
+		conn.onConnectFailure = func(reason string) {
+			if cm.onConnectFailure != nil {
+				cm.onConnectFailure(connID, reason)
+			}
+		}
+		conn.onDisconnect = func(reason string) {
+			if cm.onDisconnect != nil {
+				cm.onDisconnect(connID, reason)
+			}
+		}
+		conn.onPingRTT = func(duration time.Duration) {
+			if cm.onPingRTT != nil {
+				cm.onPingRTT(connID, duration)
+			}
 		}
 	}
 
 	// 우선순위 기반 연결 selector 생성
 	cm.selector = NewPriorityConnSelector(logger, cm.connections)
+	cm.selector.onActiveChange = func(from string, to string, reason string) {
+		if cm.onActiveConnChange != nil {
+			cm.onActiveConnChange(from, to, reason)
+		}
+	}
 
 	return cm
 }
@@ -304,8 +348,32 @@ func (cm *ConnectionManager) SetFrameReadCallback(callback func(frame *config.Fr
 }
 
 // SetStateChangeCallback sets the callback for state changes
-func (cm *ConnectionManager) SetStateChangeCallback(callback func(connType string, state string)) {
+func (cm *ConnectionManager) SetStateChangeCallback(callback func(connID string, endpoint string, state string)) {
 	cm.onStateChange = callback
+}
+
+func (cm *ConnectionManager) SetConnectAttemptCallback(callback func(connID string)) {
+	cm.onConnectAttempt = callback
+}
+
+func (cm *ConnectionManager) SetConnectSuccessCallback(callback func(connID string)) {
+	cm.onConnectSuccess = callback
+}
+
+func (cm *ConnectionManager) SetConnectFailureCallback(callback func(connID string, reason string)) {
+	cm.onConnectFailure = callback
+}
+
+func (cm *ConnectionManager) SetDisconnectCallback(callback func(connID string, reason string)) {
+	cm.onDisconnect = callback
+}
+
+func (cm *ConnectionManager) SetPingRTTCallback(callback func(connID string, duration time.Duration)) {
+	cm.onPingRTT = callback
+}
+
+func (cm *ConnectionManager) SetActiveConnectionChangeCallback(callback func(from string, to string, reason string)) {
+	cm.onActiveConnChange = callback
 }
 
 // ListHandshakeResponses returns the latest HELLO responses keyed by peer sys-id.
@@ -359,6 +427,16 @@ func (c *ConnMgr) GetState() string {
 	return c.state
 }
 
+func (c *ConnMgr) GetEndpointAddress() string {
+	return c.endpoint.Address()
+}
+
+func (c *ConnMgr) GetLastActivityTime() time.Time {
+	c.activityMu.Lock()
+	defer c.activityMu.Unlock()
+	return c.lastActivityTime
+}
+
 // setState sets the connection state and triggers callback
 func (c *ConnMgr) setState(newState string) {
 	c.mu.Lock()
@@ -404,12 +482,18 @@ func (c *ConnMgr) connectionLoop() {
 
 // attemptConnection attempts to establish a connection
 func (c *ConnMgr) attemptConnection() {
+	if c.onConnectAttempt != nil {
+		c.onConnectAttempt()
+	}
 	c.setState(config.ConnStateConnecting)
 
 	// Establish TCP connection
 	conn, err := net.DialTimeout("tcp", c.endpoint.Address(), c.config.ConnectTimeout)
 	if err != nil {
 		c.logger.Error("failed to connect", "error", err)
+		if c.onConnectFailure != nil {
+			c.onConnectFailure(classifyDialError(err))
+		}
 		c.setState(config.ConnStateConnectFailed)
 		return
 	}
@@ -429,12 +513,18 @@ func (c *ConnMgr) attemptConnection() {
 	if err := c.performHandshake(); err != nil {
 		c.logger.Error("handshake failed", "error", err)
 		c.cleanupConnection()
+		if c.onConnectFailure != nil {
+			c.onConnectFailure(classifyHandshakeError(err))
+		}
 		c.setState(config.ConnStateConnectFailed)
 		return
 	}
 
 	// Connection ready
 	c.setState(config.ConnStateReady)
+	if c.onConnectSuccess != nil {
+		c.onConnectSuccess()
+	}
 
 	// Initialize activity time
 	c.updateLastActivity()
@@ -595,8 +685,13 @@ func (c *ConnMgr) readLoop() {
 		return
 	}
 
+	disconnectReason := ""
 	defer func() {
 		c.cleanupConnection()
+		disconnectReason = c.takeDisconnectReason(disconnectReason)
+		if disconnectReason != "" && c.onDisconnect != nil {
+			c.onDisconnect(disconnectReason)
+		}
 		c.setState(config.ConnStateDisconnected)
 	}()
 
@@ -618,6 +713,10 @@ func (c *ConnMgr) readLoop() {
 		// Byte 5-8: Transaction Identifier (Big Endian)
 		header := make([]byte, 8)
 		if _, err := io.ReadFull(conn, header); err != nil {
+			if c.ctx.Err() != nil {
+				return
+			}
+			disconnectReason = classifyReadError(err)
 			if err != io.EOF {
 				c.logger.Error("failed to read frame header", "error", err)
 			}
@@ -672,6 +771,7 @@ func (c *ConnMgr) readLoop() {
 		if payloadLen > 0 {
 			payload = make([]byte, payloadLen)
 			if _, err := io.ReadFull(conn, payload); err != nil {
+				disconnectReason = "read_error"
 				c.logger.Error("failed to read frame payload", "error", err)
 				return
 			}
@@ -693,7 +793,12 @@ func (c *ConnMgr) readLoop() {
 				// Received PONG, clear awaiting flag
 				c.activityMu.Lock()
 				c.awaitingPong = false
+				pingSentAt := c.lastPingSentAt
+				c.lastPingSentAt = time.Time{}
 				c.activityMu.Unlock()
+				if !pingSentAt.IsZero() && c.onPingRTT != nil {
+					c.onPingRTT(time.Since(pingSentAt))
+				}
 				c.logger.Info("<<< PING-RESP received", "tid", tid)
 			}
 			// Skip further processing for ping/pong frames
@@ -797,9 +902,14 @@ func (s *PriorityConnSelector) selectActiveConnection() {
 		s.active = newActive
 		s.activePriority = newPriority
 
+		reason := determineActiveChangeReason(oldPriority, newPriority)
+		if s.onActiveChange != nil {
+			s.onActiveChange(oldActive, newActiveID, reason)
+		}
 		s.logger.Info("active connection changed",
 			"from", oldActive, "from_priority", oldPriority,
-			"to", newActiveID, "to_priority", newPriority)
+			"to", newActiveID, "to_priority", newPriority,
+			"reason", reason)
 	}
 }
 
@@ -840,6 +950,7 @@ func (c *ConnMgr) pingLoop() {
 			if awaitingPong && idleTime > timeout {
 				c.logger.Error("ping timeout: no PONG received", "timeout", timeout, "idle_time", idleTime)
 				// Close connection to trigger reconnection
+				c.markDisconnectReason("ping_timeout")
 				c.cleanupConnection()
 				c.setState(config.ConnStateDisconnected)
 				return
@@ -851,6 +962,7 @@ func (c *ConnMgr) pingLoop() {
 				if err := c.sendPing(); err != nil {
 					c.logger.Error("failed to send ping", "error", err)
 					// Close connection to trigger reconnection
+					c.markDisconnectReason("write_error")
 					c.cleanupConnection()
 					c.setState(config.ConnStateDisconnected)
 					return
@@ -860,6 +972,7 @@ func (c *ConnMgr) pingLoop() {
 				c.activityMu.Lock()
 				c.awaitingPong = true
 				c.lastActivityTime = time.Now() // PING도 마지막 전송 시간으로 기록
+				c.lastPingSentAt = c.lastActivityTime
 				c.activityMu.Unlock()
 			}
 		}
@@ -903,6 +1016,24 @@ func (c *ConnMgr) updateLastActivity() {
 	c.activityMu.Unlock()
 }
 
+func (c *ConnMgr) markDisconnectReason(reason string) {
+	c.activityMu.Lock()
+	c.disconnectReason = reason
+	c.activityMu.Unlock()
+}
+
+func (c *ConnMgr) takeDisconnectReason(fallback string) string {
+	c.activityMu.Lock()
+	defer c.activityMu.Unlock()
+
+	if c.disconnectReason != "" {
+		reason := c.disconnectReason
+		c.disconnectReason = ""
+		return reason
+	}
+	return fallback
+}
+
 // Write sends data through the connection and updates activity time
 func (c *ConnMgr) Write(data []byte) (int, error) {
 	conn := c.GetConn()
@@ -917,4 +1048,43 @@ func (c *ConnMgr) Write(data []byte) (int, error) {
 		c.updateLastActivity()
 	}
 	return n, err
+}
+
+func classifyDialError(err error) string {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return "dial_timeout"
+	}
+	return "dial_error"
+}
+
+func classifyHandshakeError(err error) string {
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return "handshake_timeout"
+	}
+	return "handshake_error"
+}
+
+func classifyReadError(err error) string {
+	if err == io.EOF {
+		return "remote_close"
+	}
+	if ne, ok := err.(net.Error); ok && ne.Timeout() {
+		return "read_timeout"
+	}
+	return "read_error"
+}
+
+func determineActiveChangeReason(oldPriority int, newPriority int) string {
+	switch {
+	case oldPriority == -1 && newPriority >= 0:
+		return "selected"
+	case oldPriority >= 0 && newPriority == -1:
+		return "connection_lost"
+	case oldPriority >= 0 && newPriority > oldPriority:
+		return "failover"
+	case oldPriority >= 0 && newPriority < oldPriority:
+		return "higher_priority_restored"
+	default:
+		return "active_changed"
+	}
 }

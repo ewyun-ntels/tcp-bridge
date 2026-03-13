@@ -2,6 +2,7 @@ package worker
 
 import (
 	"fmt"
+	"strings"
 
 	"tcp-bridge/internal/config"
 
@@ -48,7 +49,7 @@ func (h *BridgeHandler) sendTCPResponse(tid uint32, msgType uint8, payload []byt
 	}
 }
 
-func (h *BridgeHandler) sendTCPResponseToConnection(connectionID string, tid uint32, msgType uint8, payload []byte) {
+func (h *BridgeHandler) sendTCPResponseToConnection(connectionID string, tid uint32, msgType uint8, payload []byte) error {
 	responseFrame := &config.Frame{
 		Type:    msgType,
 		TID:     tid,
@@ -61,12 +62,14 @@ func (h *BridgeHandler) sendTCPResponseToConnection(connectionID string, tid uin
 			"tid", tid,
 			"msg_type", fmt.Sprintf("0x%02x", msgType),
 			"error", err)
-	} else {
-		h.logger.Debug("sent TCP response to connection",
-			"connection_id", connectionID,
-			"tid", tid,
-			"msg_type", fmt.Sprintf("0x%02x", msgType))
+		return err
 	}
+
+	h.logger.Debug("sent TCP response to connection",
+		"connection_id", connectionID,
+		"tid", tid,
+		"msg_type", fmt.Sprintf("0x%02x", msgType))
+	return nil
 }
 
 func (h *BridgeHandler) sendTCPErrorResponse(tid uint32, msgType uint8, errMsg string) {
@@ -74,9 +77,9 @@ func (h *BridgeHandler) sendTCPErrorResponse(tid uint32, msgType uint8, errMsg s
 	h.sendTCPResponse(tid, msgType, errorPayload)
 }
 
-func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, tid uint32, msgType uint8, errMsg string) {
+func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, tid uint32, msgType uint8, errMsg string) error {
 	errorPayload := []byte(fmt.Sprintf(`{"error":"%s"}`, errMsg))
-	h.sendTCPResponseToConnection(connectionID, tid, msgType, errorPayload)
+	return h.sendTCPResponseToConnection(connectionID, tid, msgType, errorPayload)
 }
 
 func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) {
@@ -86,5 +89,22 @@ func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) {
 		if err := replyPublisher.PublishReply(msg.Reply, errorResponse); err != nil {
 			h.logger.Error("failed to send error reply", "error", err)
 		}
+	}
+}
+
+func formatMsgType(msgType uint8) string {
+	return fmt.Sprintf("0x%02x", msgType)
+}
+
+func classifyInboundWriteError(err error) string {
+	if err == nil {
+		return ""
+	}
+	errMsg := err.Error()
+	switch {
+	case strings.Contains(errMsg, "is not ready"):
+		return "connection_not_ready"
+	default:
+		return "tcp_write_error"
 	}
 }

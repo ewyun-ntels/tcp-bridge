@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/binary"
 	"fmt"
+	"time"
 )
 
 // Message types (4.1.1.d)
@@ -59,6 +60,8 @@ type Frame struct {
 
 	// Metadata (not serialized, for runtime use only)
 	ConnectionID string // Which connection this frame came from (endpoint별 구분용)
+	ReceivedAt   time.Time
+	EnqueuedAt   time.Time
 }
 
 // SendJob represents a job in the send queue

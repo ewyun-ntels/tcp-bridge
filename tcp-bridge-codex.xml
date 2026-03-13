@@ -496,108 +496,75 @@
     </mxGraphModel>
   </diagram>
   <diagram id="d35oqj7bwlL3PKZ5amhx" name="it&#39;s me">
-    <mxGraphModel dx="1665" dy="841" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
+    <mxGraphModel dx="2108" dy="626" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="827" pageHeight="1169" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-1" parent="1" style="text;html=1;strokeColor=none;fillColor=none;align=left;verticalAlign=middle;fontSize=20;fontStyle=1" value="tcp-bridge runtime flow (synced to current source)" vertex="1">
-          <mxGeometry height="30" width="700" x="160" y="870" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f0fe;strokeColor=#5b8def;fontStyle=1" value="A. NATS -&gt; TCP" vertex="1">
-          <mxGeometry height="860" width="880" x="160" y="930" as="geometry" />
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-2" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e8f0fe;strokeColor=#5b8def;fontStyle=1" value="" vertex="1">
+          <mxGeometry height="860" width="1010" x="160" y="920" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-3" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#eaf7e6;strokeColor=#82b366;fontStyle=1" value="B. TCP -&gt; NATS" vertex="1">
-          <mxGeometry height="860" width="900" x="1080" y="930" as="geometry" />
+          <mxGeometry height="860" width="900" x="1254" y="930" as="geometry" />
         </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="nats.Conn&#xa;QueueSubscribe(each configured outbound.subject, &quot;tcp-bridge-workers&quot;)&#xa;ex) 05 -&gt; tcp.subs.change, 09 -&gt; tcp.cellinfo.noti" vertex="1">
-          <mxGeometry height="80" width="260" x="190" y="980" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-5" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="Subscriber.handleMessage(msg)&#xa;- logs subject/reply/size&#xa;- invokes bridge.HandleOutboundRequest(msg)" vertex="1">
-          <mxGeometry height="90" width="260" x="490" y="980" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-6" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="BridgeHandler.HandleOutboundRequest(msg)&#xa;- outboundPool.Enqueue(msg)&#xa;- if full: replyError(msg, json error)" vertex="1">
-          <mxGeometry height="90" width="220" x="790" y="980" as="geometry" />
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-4" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="nats.Subscriber&lt;div&gt;- outboundPool.Enqueue(msg)&lt;br&gt;ex) 05 -&amp;gt; tcp.subs.change, &lt;br&gt;&amp;nbsp; &amp;nbsp;09 -&amp;gt; tcp.cellinfo.noti&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="240" x="190" y="980" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-7" parent="1" style="shape=process;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1" value="chan *nats.Msg&#xa;outbound jobs&#xa;buffer = outbound.queue_size" vertex="1">
-          <mxGeometry height="90" width="260" x="450" y="1130" as="geometry" />
+          <mxGeometry height="75" width="260" x="510" y="980" as="geometry" />
         </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-8" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="worker goroutines&#xa;startWorkers(outbound, outbound.worker_count)&#xa;workerLoop() reads outbound jobs" vertex="1">
-          <mxGeometry height="90" width="260" x="430" y="1240" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-9" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="OutboundWorkerPool.process(msg)&#xa;1. reject if reply subject is empty (request/response only)&#xa;2. generateTID()&#xa;3. resolveOutboundRoute(subject) by scanning outbound routes&#xa;4. build config.Frame{Type,TID,Payload}" vertex="1">
-          <mxGeometry height="100" width="260" x="200" y="1410" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" value="InflightA.Register(tid, reply, subject, requestType, expectedResponseType, deadline)&#xa;entry stores Subject / RequestType / ExpectedResponseType / ConnectionID" vertex="1">
-          <mxGeometry height="90" width="260" x="510" y="1410" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-11" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="sendAndWaitWithRetry(frame, inflightEntry)&#xa;- connMgr.GetConnections()&#xa;- READY check by priority&#xa;- per-priority retryAttempts loop&#xa;- conn.Write(serialized frame)" vertex="1">
-          <mxGeometry height="120" width="290" x="200" y="1570" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-12" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450" value="wait on inflightEntry.ResponseChan or time.After(response_timeout)&#xa;- response already validated by InflightA (connection + expectedResponseType)&#xa;- success: ReplyPublisher.PublishReply(replySubject, response.Payload)&#xa;- timeout: retry&#xa;- all fail: InflightA.Remove + replyError" vertex="1">
-          <mxGeometry height="120" width="420" x="540" y="1570" as="geometry" />
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-10" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" value="InflightA.Outboud.Context&lt;br&gt;ex) tid, requestType, ConnID" vertex="1">
+          <mxGeometry height="90" width="260" x="840" y="1091" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-13" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" value="TCP response path back into A&#xa;App.handleTCPResponse(frame)&#xa;- inflightMgr.GetInflightA().HandleResponse(frame)&#xa;- matched ResponseChan &lt;- frame" vertex="1">
-          <mxGeometry height="70" width="280" x="710" y="1710" as="geometry" />
+          <mxGeometry height="70" width="280" x="900" y="1730" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-14" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="ConnMgr.readLoop()&#xa;- reads business frame&#xa;- sets frame.ConnectionID" vertex="1">
-          <mxGeometry height="80" width="240" x="1110" y="980" as="geometry" />
+          <mxGeometry height="80" width="240" x="1284" y="980" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-15" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="tcp.Reader.handleFrame(frame)&#xa;- MessageTypeRouting.IsRequestType(frame.Type) =&gt; onRequestFrame(frame)&#xa;- MessageTypeRouting.IsResponseType(frame.Type) =&gt; onResponseFrame(frame)" vertex="1">
-          <mxGeometry height="90" width="240" x="1390" y="980" as="geometry" />
+          <mxGeometry height="90" width="240" x="1564" y="980" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-16" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="FrameDispatcher.DispatchRequestFrame(frame)&#xa;- validates MessageTypeRouting.IsRequestType(frame.Type)&#xa;- calls bridge.HandleInboundFrame(frame)" vertex="1">
-          <mxGeometry height="90" width="280" x="1670" y="980" as="geometry" />
+          <mxGeometry height="90" width="280" x="1844" y="980" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-17" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="BridgeHandler.HandleInboundFrame(frame)&#xa;- inboundPool.Enqueue(frame)&#xa;- if full: sendTCPErrorResponseToConnection(...)" vertex="1">
-          <mxGeometry height="90" width="280" x="1390" y="1130" as="geometry" />
+          <mxGeometry height="90" width="280" x="1564" y="1130" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-18" parent="1" style="shape=process;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" value="chan *config.Frame&#xa;inbound jobs&#xa;buffer = inbound.queue_size" vertex="1">
-          <mxGeometry height="80" width="260" x="1080" y="1140" as="geometry" />
+          <mxGeometry height="80" width="260" x="1254" y="1140" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-19" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="worker goroutines&#xa;startWorkers(inbound, inbound.worker_count)&#xa;workerLoop() reads inbound jobs" vertex="1">
-          <mxGeometry height="90" width="260" x="1080" y="1270" as="geometry" />
+          <mxGeometry height="90" width="260" x="1254" y="1270" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-20" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="InboundWorkerPool.process(frame)&#xa;1. subject := GetInboundSubjectForMessageType(frame.Type)&#xa;2. responseType := GetResponseType(frame.Type)&#xa;3. deadline := now + inbound.timeout" vertex="1">
-          <mxGeometry height="100" width="290" x="1080" y="1410" as="geometry" />
+          <mxGeometry height="100" width="290" x="1254" y="1410" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-21" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" value="InflightB.Register(frame.TID, TCPReplyInfo{ConnectionID, FrameType}, frame.Payload, deadline)&#xa;key = connectionID:TID" vertex="1">
-          <mxGeometry height="90" width="270" x="1410" y="1410" as="geometry" />
+          <mxGeometry height="90" width="270" x="1584" y="1410" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-22" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="Requester.RequestWithTimeoutToSubject(subject, frame.Payload, inbound.timeout)&#xa;- NATS gets payload only&#xa;- waits for []byte response" vertex="1">
-          <mxGeometry height="100" width="290" x="1080" y="1570" as="geometry" />
+          <mxGeometry height="100" width="290" x="1254" y="1570" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-23" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="success: sendTCPResponseToConnection(connectionID, tid, responseType, response)&#xa;failure: sendTCPErrorResponseToConnection(...)" vertex="1">
-          <mxGeometry height="90" width="300" x="1410" y="1570" as="geometry" />
+          <mxGeometry height="90" width="300" x="1584" y="1570" as="geometry" />
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-24" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" value="InflightB.Remove(connectionID, tid)&#xa;end of TCP -&gt; NATS request lifecycle" vertex="1">
-          <mxGeometry height="90" width="200" x="1750" y="1570" as="geometry" />
+          <mxGeometry height="90" width="200" x="1924" y="1570" as="geometry" />
         </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-25" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-4" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-5">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-27" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-4" style="endArrow=block;html=1;strokeColor=#5b8def;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-7">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="661.4893617021276" y="1069" as="sourcePoint" />
+          </mxGeometry>
         </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-26" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-5" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-6">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-29" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-7" style="endArrow=block;html=1;strokeColor=#5b8def;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-50">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="793.6363636363635" y="1340" as="sourcePoint" />
+          </mxGeometry>
         </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-27" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-6" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-7">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-28" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-7" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-8">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-29" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-8" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-9">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-30" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-9" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-10">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-31" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-10" style="endArrow=block;html=1;strokeColor=#5b8def" target="ACEr8s0o-PQMxt_8drcV-11">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-32" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-11" style="endArrow=block;html=1;strokeColor=#b85450" target="ACEr8s0o-PQMxt_8drcV-12">
-          <mxGeometry relative="1" as="geometry" />
-        </mxCell>
-        <mxCell id="ACEr8s0o-PQMxt_8drcV-33" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-13" style="endArrow=block;html=1;dashed=1;strokeColor=#d79b00" target="ACEr8s0o-PQMxt_8drcV-12" value="response">
-          <mxGeometry relative="1" as="geometry" />
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-33" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-13" style="endArrow=block;html=1;dashed=1;strokeColor=#d79b00" value="response">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="878.8888888888887" y="1690" as="targetPoint" />
+          </mxGeometry>
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-34" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-14" style="endArrow=block;html=1;strokeColor=#82b366" target="ACEr8s0o-PQMxt_8drcV-15">
           <mxGeometry relative="1" as="geometry" />
@@ -628,6 +595,114 @@
         </mxCell>
         <mxCell id="ACEr8s0o-PQMxt_8drcV-43" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-23" style="endArrow=block;html=1;strokeColor=#82b366" target="ACEr8s0o-PQMxt_8drcV-24">
           <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-44" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="NATS" vertex="1">
+          <mxGeometry height="160" width="120" x="-69" y="944" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-46" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="metrics.Server" vertex="1">
+          <mxGeometry height="80" width="240" x="190" y="1098" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-48" parent="1" style="rounded=0;whiteSpace=wrap;html=1;" value="PG" vertex="1">
+          <mxGeometry height="160" width="120" x="-70" y="1418" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-60" connectable="0" parent="1" style="group" value="" vertex="1">
+          <mxGeometry height="80" width="260" x="510" y="1098" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-50" parent="ACEr8s0o-PQMxt_8drcV-60" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="outboud.Pool&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="260" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-52" parent="ACEr8s0o-PQMxt_8drcV-60" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="8" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-53" parent="ACEr8s0o-PQMxt_8drcV-60" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="68" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-54" parent="ACEr8s0o-PQMxt_8drcV-60" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="128" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-55" parent="ACEr8s0o-PQMxt_8drcV-60" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="188" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-62" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-50" style="endArrow=block;html=1;strokeColor=#5b8def;exitX=1;exitY=0.5;exitDx=0;exitDy=0;" target="ACEr8s0o-PQMxt_8drcV-10">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="740" y="1160" as="sourcePoint" />
+            <mxPoint x="860" y="1250" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-65" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-44" style="endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=1.008;exitY=0.456;exitDx=0;exitDy=0;exitPerimeter=0;" target="ACEr8s0o-PQMxt_8drcV-4" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="450" y="1310" as="sourcePoint" />
+            <mxPoint x="500" y="1260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-67" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-48" style="endArrow=classic;startArrow=classic;html=1;rounded=0;exitX=1.008;exitY=0.438;exitDx=0;exitDy=0;exitPerimeter=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-68" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="53" y="1503.04" as="sourcePoint" />
+            <mxPoint x="210" y="1414" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-68" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="ConnMgr.readLoop()&lt;br&gt;- sets frame.ConnectionID" vertex="1">
+          <mxGeometry height="80" width="240" x="190" y="1460" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-69" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="ConnMgr.Write()&lt;br&gt;- sets frame.ConnectionID" vertex="1">
+          <mxGeometry height="80" width="240" x="190" y="1330" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-70" edge="1" parent="1" style="endArrow=block;html=1;strokeColor=#5b8def;entryX=1;entryY=0.5;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-69">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="640" y="1180" as="sourcePoint" />
+            <mxPoint x="620" y="1256" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-71" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-69" style="endArrow=classic;html=1;rounded=0;entryX=1;entryY=0.431;entryDx=0;entryDy=0;entryPerimeter=0;exitX=0;exitY=0.5;exitDx=0;exitDy=0;" target="ACEr8s0o-PQMxt_8drcV-48" value="">
+          <mxGeometry height="50" relative="1" width="50" as="geometry">
+            <mxPoint x="750" y="1310" as="sourcePoint" />
+            <mxPoint x="800" y="1260" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-72" parent="1" style="shape=process;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" value="chan *config.Frame&#xa;inbound jobs&#xa;buffer = inbound.queue_size" vertex="1">
+          <mxGeometry height="80" width="260" x="510" y="1338" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-73" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-68" style="endArrow=block;html=1;strokeColor=#5b8def;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-72">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="521" y="1152" as="sourcePoint" />
+            <mxPoint x="581" y="1152" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-74" connectable="0" parent="1" style="group" value="" vertex="1">
+          <mxGeometry height="80" width="260" x="510" y="1460" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-51" parent="ACEr8s0o-PQMxt_8drcV-74" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#5b8def" value="inboud.Pool&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;&lt;div&gt;&lt;br&gt;&lt;/div&gt;" vertex="1">
+          <mxGeometry height="80" width="260" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-56" parent="ACEr8s0o-PQMxt_8drcV-74" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="8" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-57" parent="ACEr8s0o-PQMxt_8drcV-74" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="68" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-58" parent="ACEr8s0o-PQMxt_8drcV-74" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="128" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-59" parent="ACEr8s0o-PQMxt_8drcV-74" style="ellipse;whiteSpace=wrap;html=1;" value="goroutine" vertex="1">
+          <mxGeometry height="50" width="60" x="188" y="30" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-75" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656" value="InflightB.Inboud.Context&lt;div&gt;ex) tid, requestType, ConnID&lt;/div&gt;" vertex="1">
+          <mxGeometry height="90" width="270" x="827" y="1333" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-76" parent="1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#82b366" value="ConnMgr&lt;br&gt;- Hello, PING" vertex="1">
+          <mxGeometry height="80" width="240" x="190" y="1220" as="geometry" />
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-77" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-51" style="endArrow=block;html=1;strokeColor=#5b8def;exitX=1;exitY=0.5;exitDx=0;exitDy=0;entryX=0;entryY=0.5;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-75">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="830" y="1281" as="sourcePoint" />
+            <mxPoint x="900" y="1280" as="targetPoint" />
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="ACEr8s0o-PQMxt_8drcV-78" edge="1" parent="1" source="ACEr8s0o-PQMxt_8drcV-72" style="endArrow=block;html=1;strokeColor=#5b8def;exitX=0.5;exitY=1;exitDx=0;exitDy=0;entryX=0.5;entryY=0;entryDx=0;entryDy=0;" target="ACEr8s0o-PQMxt_8drcV-51">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="810" y="1450" as="sourcePoint" />
+            <mxPoint x="867" y="1450" as="targetPoint" />
+          </mxGeometry>
         </mxCell>
       </root>
     </mxGraphModel>

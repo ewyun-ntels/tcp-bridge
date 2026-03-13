@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"tcp-bridge/internal/config"
 	"tcp-bridge/internal/connection"
 	"tcp-bridge/internal/inflight"
+	"tcp-bridge/internal/metrics"
 	tcpnats "tcp-bridge/internal/nats"
 	"tcp-bridge/internal/tcp"
 
@@ -25,6 +27,7 @@ type BridgeHandler struct {
 	tcpSender   *tcp.Sender
 	inflightMgr *inflight.InflightManager
 	connMgr     *connection.ConnectionManager
+	metrics     *metrics.Metrics
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -43,6 +46,7 @@ func NewBridgeHandler(
 	tcpSender *tcp.Sender,
 	inflightMgr *inflight.InflightManager,
 	connMgr *connection.ConnectionManager,
+	metrics *metrics.Metrics,
 ) *BridgeHandler {
 	handler := &BridgeHandler{
 		logger:         logger,
@@ -53,6 +57,7 @@ func NewBridgeHandler(
 		tcpSender:      tcpSender,
 		inflightMgr:    inflightMgr,
 		connMgr:        connMgr,
+		metrics:        metrics,
 	}
 
 	handler.outboundPool = &OutboundWorkerPool{
@@ -65,6 +70,7 @@ func NewBridgeHandler(
 		logger:  logger.With("worker_pool", "inbound"),
 		config:  inboundConfig,
 	}
+	handler.inflightMgr.GetInflightB().SetExpireCallback(handler.handleInboundInflightExpiry)
 
 	return handler
 }
@@ -116,15 +122,27 @@ func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
 
 // HandleInboundFrame enqueues inbound work into the dedicated pool.
 func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
+	frame.EnqueuedAt = time.Now()
 	if !h.inboundPool.Enqueue(frame) {
-		logger := h.logger.With("tid", frame.TID, "connection_id", frame.ConnectionID)
+		msgType := formatMsgType(frame.Type)
+		logger := h.logger.With("tid", frame.TID, "connection_id", frame.ConnectionID, "msg_type", msgType)
 		logger.Error("inbound worker queue is full")
 
 		responseType := h.natsConfig.MessageTypeRouting.GetResponseType(frame.Type)
 		if responseType == 0 {
 			responseType = frame.Type
 		}
-		h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full")
+		writeStartedAt := time.Now()
+		err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full")
+		h.metrics.ObserveInboundResponseWriteDuration(msgType, "dropped", time.Since(writeStartedAt))
+		h.metrics.IncInboundResponses(msgType, "dropped")
+		h.metrics.AddInboundInflight(msgType, -1)
+		if !frame.ReceivedAt.IsZero() {
+			h.metrics.ObserveInboundEndToEndDuration(msgType, "dropped", time.Since(frame.ReceivedAt))
+		}
+		if err != nil {
+			h.metrics.IncInboundErrors(msgType, classifyInboundWriteError(err))
+		}
 	}
 }
 
@@ -151,4 +169,14 @@ func (d *FrameDispatcher) DispatchRequestFrame(frame *config.Frame) {
 	}
 
 	d.bridge.HandleInboundFrame(frame)
+}
+
+func (h *BridgeHandler) handleInboundInflightExpiry(entry *inflight.InflightEntryB) {
+	msgType := formatMsgType(entry.RequestType)
+	h.metrics.IncInboundErrors(msgType, "inflight_expired")
+	h.metrics.IncInboundTimeout(msgType, "overall")
+	h.metrics.IncInboundUnmatchedResponse(msgType)
+	h.metrics.IncInboundResponses(msgType, "timeout")
+	h.metrics.IncInboundWorkerTasks("timeout")
+	h.metrics.AddInboundInflight(msgType, -1)
 }
