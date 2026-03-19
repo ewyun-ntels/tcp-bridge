@@ -70,9 +70,9 @@ message_handler:
                                 # - 빠른 응답 감지를 위해 짧게 설정 (3-5s 권장)
     
     # 같은 connection 재시도 설정
-    retry_attempts: 10           # 같은 priority에서 재시도 횟수
-    worker_count: 4              # NATS→TCP worker 수
-    queue_size: 128              # NATS→TCP 작업 큐 크기
+    retry_attempts: 10            # 같은 priority에서 재시도 횟수
+    worker_count: 20              # NATS→TCP worker 수
+    queue_size: 500               # NATS→TCP 작업 큐 크기
     
     # 참고: 최대 소요 시간은 자동 계산됨
     # = endpoints × retry_attempts × response_timeout
@@ -83,8 +83,8 @@ message_handler:
     timeout: "30s"              # NATS Request 응답 대기 시간
                                 # - TCP에서 받은 요청을 NATS로 전송 후 응답 대기
                                 # - NATS는 자체 고가용성 클러스터 구성으로 재시도 불필요
-    worker_count: 4             # TCP→NATS worker 수
-    queue_size: 128             # TCP→NATS 작업 큐 크기
+    worker_count: 20            # TCP→NATS worker 수
+    queue_size: 500             # TCP→NATS 작업 큐 크기
 
 metrics:
   enabled: true

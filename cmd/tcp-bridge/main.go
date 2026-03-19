@@ -136,7 +136,7 @@ func (a *App) initializeComponents() {
 	a.metrics = metrics.NewMetrics(a.logger.With("component", "metrics"), &a.config.Metrics)
 
 	// Create connection manager
-	a.connMgr = connection.NewConnectionManager(a.logger.With("component", "connection-mgr"), &a.config.TCP)
+	a.connMgr = connection.NewConnectionManager(a.logger.With("component", "conn-manager"), &a.config.TCP)
 	a.metrics.SetKeyListProvider(a.connMgr.ListHandshakeResponses)
 
 	// Set connection state change callback for metrics
