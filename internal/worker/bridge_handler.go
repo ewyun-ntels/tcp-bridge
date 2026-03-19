@@ -134,14 +134,14 @@ func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 		}
 		writeStartedAt := time.Now()
 		err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full")
-		h.metrics.ObserveInboundResponseWriteDuration(msgType, "dropped", time.Since(writeStartedAt))
-		h.metrics.IncInboundResponses(msgType, "dropped")
-		h.metrics.AddInboundInflight(msgType, -1)
+		h.metrics.ObserveInboundResponseWriteDuration(frame.ConnectionID, msgType, "dropped", time.Since(writeStartedAt))
+		h.metrics.IncInboundResponses(frame.ConnectionID, msgType, "dropped")
+		h.metrics.AddInboundInflight(frame.ConnectionID, msgType, -1)
 		if !frame.ReceivedAt.IsZero() {
-			h.metrics.ObserveInboundEndToEndDuration(msgType, "dropped", time.Since(frame.ReceivedAt))
+			h.metrics.ObserveInboundEndToEndDuration(frame.ConnectionID, msgType, "dropped", time.Since(frame.ReceivedAt))
 		}
 		if err != nil {
-			h.metrics.IncInboundErrors(msgType, classifyInboundWriteError(err))
+			h.metrics.IncInboundErrors(frame.ConnectionID, msgType, classifyInboundWriteError(err))
 		}
 	}
 }
@@ -173,10 +173,14 @@ func (d *FrameDispatcher) DispatchRequestFrame(frame *config.Frame) {
 
 func (h *BridgeHandler) handleInboundInflightExpiry(entry *inflight.InflightEntryB) {
 	msgType := formatMsgType(entry.RequestType)
-	h.metrics.IncInboundErrors(msgType, "inflight_expired")
-	h.metrics.IncInboundTimeout(msgType, "overall")
-	h.metrics.IncInboundUnmatchedResponse(msgType)
-	h.metrics.IncInboundResponses(msgType, "timeout")
-	h.metrics.IncInboundWorkerTasks("timeout")
-	h.metrics.AddInboundInflight(msgType, -1)
+	connectionID := ""
+	if entry.TCPReplyInfo != nil {
+		connectionID = entry.TCPReplyInfo.ConnectionID
+	}
+	h.metrics.IncInboundErrors(connectionID, msgType, "inflight_expired")
+	h.metrics.IncInboundTimeout(connectionID, msgType, "overall")
+	h.metrics.IncInboundUnmatchedResponse(connectionID, msgType)
+	h.metrics.IncInboundResponses(connectionID, msgType, "timeout")
+	h.metrics.IncInboundWorkerTasks(connectionID, "timeout")
+	h.metrics.AddInboundInflight(connectionID, msgType, -1)
 }

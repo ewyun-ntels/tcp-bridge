@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"tcp-bridge/internal/config"
@@ -22,6 +23,7 @@ type Metrics struct {
 
 	// Connection metrics
 	connectionState              *prometheus.GaugeVec
+	connectionInfo               *prometheus.GaugeVec
 	activeConnection             *prometheus.GaugeVec
 	connectionAttemptsTotal      *prometheus.CounterVec
 	connectionSuccessTotal       *prometheus.CounterVec
@@ -70,7 +72,7 @@ type Metrics struct {
 	inboundTimeoutTotal             *prometheus.CounterVec
 	inboundUnmatchedResponseTotal   *prometheus.CounterVec
 	inboundWorkerTasksTotal         *prometheus.CounterVec
-	inboundQueueWaitDurationSeconds prometheus.Histogram
+	inboundQueueWaitDurationSeconds *prometheus.HistogramVec
 
 	// Outbound traffic quality metrics
 	outboundRequestsTotal            *prometheus.CounterVec
@@ -83,19 +85,27 @@ type Metrics struct {
 	outboundTimeoutTotal             *prometheus.CounterVec
 	outboundUnmatchedResponseTotal   *prometheus.CounterVec
 	outboundWorkerTasksTotal         *prometheus.CounterVec
-	outboundQueueWaitDurationSeconds prometheus.Histogram
+	outboundQueueWaitDurationSeconds *prometheus.HistogramVec
 
 	// HTTP server
 	server *http.Server
 
 	keyListProvider func() []json.RawMessage
+	infoMu          sync.Mutex
+	connectionPeers map[string]connectionPeerInfo
+}
+
+type connectionPeerInfo struct {
+	endpoint  string
+	peerSysID string
 }
 
 // NewMetrics creates new metrics instance
 func NewMetrics(logger *slog.Logger, cfg *config.MetricsConfig) *Metrics {
 	m := &Metrics{
-		logger: logger,
-		config: cfg,
+		logger:          logger,
+		config:          cfg,
+		connectionPeers: make(map[string]connectionPeerInfo),
 	}
 
 	m.initMetrics()
@@ -118,6 +128,14 @@ func (m *Metrics) initMetrics() {
 			Help: "Connection state (0=disconnected, 1=connecting, 2=ready)",
 		},
 		[]string{"connection_id", "endpoint"},
+	)
+
+	m.connectionInfo = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Name: "tcp_bridge_connection_info",
+			Help: "Static connection metadata including configured endpoint and peer sys-id learned from HELLO ACK",
+		},
+		[]string{"connection_id", "endpoint", "peer_sys_id"},
 	)
 
 	m.activeConnection = prometheus.NewGaugeVec(
@@ -191,7 +209,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_tcp_frames_sent_total",
 			Help: "Total number of TCP frames sent",
 		},
-		[]string{"frame_type", "target"},
+		[]string{"connection_id", "frame_type", "target"},
 	)
 
 	m.tcpFramesReceived = prometheus.NewCounterVec(
@@ -199,7 +217,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_tcp_frames_received_total",
 			Help: "Total number of TCP frames received",
 		},
-		[]string{"frame_type"},
+		[]string{"connection_id", "frame_type"},
 	)
 
 	m.tcpBytesTransmitted = prometheus.NewCounterVec(
@@ -207,7 +225,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_tcp_bytes_transmitted_total",
 			Help: "Total number of bytes transmitted over TCP",
 		},
-		[]string{"direction"},
+		[]string{"connection_id", "direction"},
 	)
 
 	// NATS metrics
@@ -322,7 +340,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_requests_total",
 			Help: "Total number of inbound TCP requests received",
 		},
-		[]string{"msg_type"},
+		[]string{"connection_id", "msg_type"},
 	)
 
 	m.inboundResponsesTotal = prometheus.NewCounterVec(
@@ -330,7 +348,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_responses_total",
 			Help: "Total number of completed inbound request outcomes",
 		},
-		[]string{"msg_type", "status"},
+		[]string{"connection_id", "msg_type", "status"},
 	)
 
 	m.inboundInflightRequests = prometheus.NewGaugeVec(
@@ -338,7 +356,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_inflight_requests",
 			Help: "Current number of inflight inbound requests",
 		},
-		[]string{"msg_type"},
+		[]string{"connection_id", "msg_type"},
 	)
 
 	m.inboundEndToEndDuration = prometheus.NewHistogramVec(
@@ -347,7 +365,7 @@ func (m *Metrics) initMetrics() {
 			Help:    "End-to-end duration from inbound TCP request receipt to final TCP response handling",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"msg_type", "status"},
+		[]string{"connection_id", "msg_type", "status"},
 	)
 
 	m.inboundNATSRequestDuration = prometheus.NewHistogramVec(
@@ -356,7 +374,7 @@ func (m *Metrics) initMetrics() {
 			Help:    "Duration spent waiting for the NATS request/reply round trip",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"msg_type", "status"},
+		[]string{"connection_id", "msg_type", "status"},
 	)
 
 	m.inboundResponseWriteDuration = prometheus.NewHistogramVec(
@@ -365,7 +383,7 @@ func (m *Metrics) initMetrics() {
 			Help:    "Duration spent writing inbound TCP responses back to the source connection",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"msg_type", "status"},
+		[]string{"connection_id", "msg_type", "status"},
 	)
 
 	m.inboundErrorsTotal = prometheus.NewCounterVec(
@@ -373,7 +391,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_errors_total",
 			Help: "Total number of inbound processing errors by type",
 		},
-		[]string{"msg_type", "error_type"},
+		[]string{"connection_id", "msg_type", "error_type"},
 	)
 
 	m.inboundTimeoutTotal = prometheus.NewCounterVec(
@@ -381,7 +399,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_timeout_total",
 			Help: "Total number of inbound timeouts by stage",
 		},
-		[]string{"msg_type", "stage"},
+		[]string{"connection_id", "msg_type", "stage"},
 	)
 
 	m.inboundUnmatchedResponseTotal = prometheus.NewCounterVec(
@@ -389,7 +407,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_unmatched_response_total",
 			Help: "Total number of inbound requests that expired without a matched completion",
 		},
-		[]string{"msg_type"},
+		[]string{"connection_id", "msg_type"},
 	)
 
 	m.inboundWorkerTasksTotal = prometheus.NewCounterVec(
@@ -397,15 +415,16 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_worker_tasks_total",
 			Help: "Total number of inbound worker tasks processed",
 		},
-		[]string{"status"},
+		[]string{"connection_id", "status"},
 	)
 
-	m.inboundQueueWaitDurationSeconds = prometheus.NewHistogram(
+	m.inboundQueueWaitDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "tcp_bridge_inbound_queue_wait_duration_seconds",
 			Help:    "Time spent waiting in the inbound worker queue before processing starts",
 			Buckets: prometheus.DefBuckets,
 		},
+		[]string{"connection_id"},
 	)
 
 	m.outboundRequestsTotal = prometheus.NewCounterVec(
@@ -413,7 +432,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_requests_total",
 			Help: "Total number of outbound NATS requests received",
 		},
-		[]string{"subject", "msg_type"},
+		[]string{"connection_id", "subject", "msg_type"},
 	)
 
 	m.outboundResponsesTotal = prometheus.NewCounterVec(
@@ -421,7 +440,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_responses_total",
 			Help: "Total number of completed outbound request outcomes",
 		},
-		[]string{"subject", "msg_type", "status"},
+		[]string{"connection_id", "subject", "msg_type", "status"},
 	)
 
 	m.outboundInflightRequests = prometheus.NewGaugeVec(
@@ -429,7 +448,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_inflight_requests",
 			Help: "Current number of inflight outbound requests",
 		},
-		[]string{"subject", "msg_type"},
+		[]string{"connection_id", "subject", "msg_type"},
 	)
 
 	m.outboundEndToEndDuration = prometheus.NewHistogramVec(
@@ -438,7 +457,7 @@ func (m *Metrics) initMetrics() {
 			Help:    "End-to-end duration from outbound NATS request receipt to final NATS reply publish",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"subject", "msg_type", "status"},
+		[]string{"connection_id", "subject", "msg_type", "status"},
 	)
 
 	m.outboundTCPResponseWaitDuration = prometheus.NewHistogramVec(
@@ -447,7 +466,7 @@ func (m *Metrics) initMetrics() {
 			Help:    "Duration spent waiting for the TCP response after an outbound send",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"subject", "msg_type", "status"},
+		[]string{"connection_id", "subject", "msg_type", "status"},
 	)
 
 	m.outboundNATSReplyDuration = prometheus.NewHistogramVec(
@@ -456,7 +475,7 @@ func (m *Metrics) initMetrics() {
 			Help:    "Duration spent publishing the outbound NATS reply",
 			Buckets: prometheus.DefBuckets,
 		},
-		[]string{"subject", "msg_type", "status"},
+		[]string{"connection_id", "subject", "msg_type", "status"},
 	)
 
 	m.outboundErrorsTotal = prometheus.NewCounterVec(
@@ -464,7 +483,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_errors_total",
 			Help: "Total number of outbound processing errors by type",
 		},
-		[]string{"subject", "msg_type", "error_type"},
+		[]string{"connection_id", "subject", "msg_type", "error_type"},
 	)
 
 	m.outboundTimeoutTotal = prometheus.NewCounterVec(
@@ -472,7 +491,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_timeout_total",
 			Help: "Total number of outbound timeouts by stage",
 		},
-		[]string{"subject", "msg_type", "stage"},
+		[]string{"connection_id", "subject", "msg_type", "stage"},
 	)
 
 	m.outboundUnmatchedResponseTotal = prometheus.NewCounterVec(
@@ -480,7 +499,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_unmatched_response_total",
 			Help: "Total number of outbound TCP responses that could not be matched to an inflight request",
 		},
-		[]string{"msg_type"},
+		[]string{"connection_id", "msg_type"},
 	)
 
 	m.outboundWorkerTasksTotal = prometheus.NewCounterVec(
@@ -488,15 +507,16 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_worker_tasks_total",
 			Help: "Total number of outbound worker tasks processed",
 		},
-		[]string{"status"},
+		[]string{"connection_id", "status"},
 	)
 
-	m.outboundQueueWaitDurationSeconds = prometheus.NewHistogram(
+	m.outboundQueueWaitDurationSeconds = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "tcp_bridge_outbound_queue_wait_duration_seconds",
 			Help:    "Time spent waiting in the outbound worker queue before processing starts",
 			Buckets: prometheus.DefBuckets,
 		},
+		[]string{"connection_id"},
 	)
 
 	if m.config.IncludeDefaultMetrics {
@@ -509,6 +529,7 @@ func (m *Metrics) initMetrics() {
 	// Register all application metrics
 	m.registry.MustRegister(
 		m.connectionState,
+		m.connectionInfo,
 		m.activeConnection,
 		m.connectionAttemptsTotal,
 		m.connectionSuccessTotal,
@@ -630,6 +651,25 @@ func (m *Metrics) SetConnectionState(connectionID string, endpoint string, state
 	m.connectionState.WithLabelValues(connectionID, endpoint).Set(stateValue)
 }
 
+func (m *Metrics) SetConnectionInfo(connectionID string, endpoint string, peerSysID string) {
+	if connectionID == "" || endpoint == "" || peerSysID == "" {
+		return
+	}
+
+	m.infoMu.Lock()
+	defer m.infoMu.Unlock()
+
+	if prev, ok := m.connectionPeers[connectionID]; ok {
+		m.connectionInfo.WithLabelValues(connectionID, prev.endpoint, prev.peerSysID).Set(0)
+	}
+
+	m.connectionInfo.WithLabelValues(connectionID, endpoint, peerSysID).Set(1)
+	m.connectionPeers[connectionID] = connectionPeerInfo{
+		endpoint:  endpoint,
+		peerSysID: peerSysID,
+	}
+}
+
 func (m *Metrics) SetActiveConnection(connectionIDs []string, activeConnectionID string) {
 	for _, connectionID := range connectionIDs {
 		m.activeConnection.WithLabelValues(connectionID).Set(0)
@@ -679,15 +719,27 @@ func (m *Metrics) IncFailover(from string, to string, reason string) {
 
 // TCP metrics methods
 func (m *Metrics) IncTCPFramesSent(frameType string, target string) {
-	m.tcpFramesSent.WithLabelValues(frameType, target).Inc()
+	m.tcpFramesSent.WithLabelValues(normalizeConnectionID(""), frameType, target).Inc()
+}
+
+func (m *Metrics) IncTCPFramesSentForConnection(connectionID string, frameType string, target string) {
+	m.tcpFramesSent.WithLabelValues(normalizeConnectionID(connectionID), frameType, target).Inc()
 }
 
 func (m *Metrics) IncTCPFramesReceived(frameType string) {
-	m.tcpFramesReceived.WithLabelValues(frameType).Inc()
+	m.tcpFramesReceived.WithLabelValues(normalizeConnectionID(""), frameType).Inc()
+}
+
+func (m *Metrics) IncTCPFramesReceivedForConnection(connectionID string, frameType string) {
+	m.tcpFramesReceived.WithLabelValues(normalizeConnectionID(connectionID), frameType).Inc()
 }
 
 func (m *Metrics) AddTCPBytesTransmitted(direction string, bytes int) {
-	m.tcpBytesTransmitted.WithLabelValues(direction).Add(float64(bytes))
+	m.tcpBytesTransmitted.WithLabelValues(normalizeConnectionID(""), direction).Add(float64(bytes))
+}
+
+func (m *Metrics) AddTCPBytesTransmittedForConnection(connectionID string, direction string, bytes int) {
+	m.tcpBytesTransmitted.WithLabelValues(normalizeConnectionID(connectionID), direction).Add(float64(bytes))
 }
 
 // NATS metrics methods
@@ -747,90 +799,97 @@ func (m *Metrics) IncWorkerErrors(pool string, errorType string) {
 	m.workerErrors.WithLabelValues(pool, errorType).Inc()
 }
 
-func (m *Metrics) IncInboundRequests(msgType string) {
-	m.inboundRequestsTotal.WithLabelValues(msgType).Inc()
+func (m *Metrics) IncInboundRequests(connectionID string, msgType string) {
+	m.inboundRequestsTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType).Inc()
 }
 
-func (m *Metrics) IncInboundResponses(msgType string, status string) {
-	m.inboundResponsesTotal.WithLabelValues(msgType, status).Inc()
+func (m *Metrics) IncInboundResponses(connectionID string, msgType string, status string) {
+	m.inboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, status).Inc()
 }
 
-func (m *Metrics) AddInboundInflight(msgType string, delta int) {
-	m.inboundInflightRequests.WithLabelValues(msgType).Add(float64(delta))
+func (m *Metrics) AddInboundInflight(connectionID string, msgType string, delta int) {
+	m.inboundInflightRequests.WithLabelValues(normalizeConnectionID(connectionID), msgType).Add(float64(delta))
 }
 
-func (m *Metrics) ObserveInboundEndToEndDuration(msgType string, status string, duration time.Duration) {
-	m.inboundEndToEndDuration.WithLabelValues(msgType, status).Observe(duration.Seconds())
+func (m *Metrics) ObserveInboundEndToEndDuration(connectionID string, msgType string, status string, duration time.Duration) {
+	m.inboundEndToEndDuration.WithLabelValues(normalizeConnectionID(connectionID), msgType, status).Observe(duration.Seconds())
 }
 
-func (m *Metrics) ObserveInboundNATSRequestDuration(msgType string, status string, duration time.Duration) {
-	m.inboundNATSRequestDuration.WithLabelValues(msgType, status).Observe(duration.Seconds())
+func (m *Metrics) ObserveInboundNATSRequestDuration(connectionID string, msgType string, status string, duration time.Duration) {
+	m.inboundNATSRequestDuration.WithLabelValues(normalizeConnectionID(connectionID), msgType, status).Observe(duration.Seconds())
 }
 
-func (m *Metrics) ObserveInboundResponseWriteDuration(msgType string, status string, duration time.Duration) {
-	m.inboundResponseWriteDuration.WithLabelValues(msgType, status).Observe(duration.Seconds())
+func (m *Metrics) ObserveInboundResponseWriteDuration(connectionID string, msgType string, status string, duration time.Duration) {
+	m.inboundResponseWriteDuration.WithLabelValues(normalizeConnectionID(connectionID), msgType, status).Observe(duration.Seconds())
 }
 
-func (m *Metrics) IncInboundErrors(msgType string, errorType string) {
-	m.inboundErrorsTotal.WithLabelValues(msgType, errorType).Inc()
+func (m *Metrics) IncInboundErrors(connectionID string, msgType string, errorType string) {
+	m.inboundErrorsTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, errorType).Inc()
 }
 
-func (m *Metrics) IncInboundTimeout(msgType string, stage string) {
-	m.inboundTimeoutTotal.WithLabelValues(msgType, stage).Inc()
+func (m *Metrics) IncInboundTimeout(connectionID string, msgType string, stage string) {
+	m.inboundTimeoutTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, stage).Inc()
 }
 
-func (m *Metrics) IncInboundUnmatchedResponse(msgType string) {
-	m.inboundUnmatchedResponseTotal.WithLabelValues(msgType).Inc()
+func (m *Metrics) IncInboundUnmatchedResponse(connectionID string, msgType string) {
+	m.inboundUnmatchedResponseTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType).Inc()
 }
 
-func (m *Metrics) IncInboundWorkerTasks(status string) {
-	m.inboundWorkerTasksTotal.WithLabelValues(status).Inc()
+func (m *Metrics) IncInboundWorkerTasks(connectionID string, status string) {
+	m.inboundWorkerTasksTotal.WithLabelValues(normalizeConnectionID(connectionID), status).Inc()
 }
 
-func (m *Metrics) ObserveInboundQueueWaitDuration(duration time.Duration) {
-	m.inboundQueueWaitDurationSeconds.Observe(duration.Seconds())
+func (m *Metrics) ObserveInboundQueueWaitDuration(connectionID string, duration time.Duration) {
+	m.inboundQueueWaitDurationSeconds.WithLabelValues(normalizeConnectionID(connectionID)).Observe(duration.Seconds())
 }
 
-func (m *Metrics) IncOutboundRequests(subject string, msgType string) {
-	m.outboundRequestsTotal.WithLabelValues(subject, msgType).Inc()
+func (m *Metrics) IncOutboundRequests(connectionID string, subject string, msgType string) {
+	m.outboundRequestsTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType).Inc()
 }
 
-func (m *Metrics) IncOutboundResponses(subject string, msgType string, status string) {
-	m.outboundResponsesTotal.WithLabelValues(subject, msgType, status).Inc()
+func (m *Metrics) IncOutboundResponses(connectionID string, subject string, msgType string, status string) {
+	m.outboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status).Inc()
 }
 
-func (m *Metrics) AddOutboundInflight(subject string, msgType string, delta int) {
-	m.outboundInflightRequests.WithLabelValues(subject, msgType).Add(float64(delta))
+func (m *Metrics) AddOutboundInflight(connectionID string, subject string, msgType string, delta int) {
+	m.outboundInflightRequests.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType).Add(float64(delta))
 }
 
-func (m *Metrics) ObserveOutboundEndToEndDuration(subject string, msgType string, status string, duration time.Duration) {
-	m.outboundEndToEndDuration.WithLabelValues(subject, msgType, status).Observe(duration.Seconds())
+func (m *Metrics) ObserveOutboundEndToEndDuration(connectionID string, subject string, msgType string, status string, duration time.Duration) {
+	m.outboundEndToEndDuration.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status).Observe(duration.Seconds())
 }
 
-func (m *Metrics) ObserveOutboundTCPResponseWaitDuration(subject string, msgType string, status string, duration time.Duration) {
-	m.outboundTCPResponseWaitDuration.WithLabelValues(subject, msgType, status).Observe(duration.Seconds())
+func (m *Metrics) ObserveOutboundTCPResponseWaitDuration(connectionID string, subject string, msgType string, status string, duration time.Duration) {
+	m.outboundTCPResponseWaitDuration.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status).Observe(duration.Seconds())
 }
 
-func (m *Metrics) ObserveOutboundNATSReplyDuration(subject string, msgType string, status string, duration time.Duration) {
-	m.outboundNATSReplyDuration.WithLabelValues(subject, msgType, status).Observe(duration.Seconds())
+func (m *Metrics) ObserveOutboundNATSReplyDuration(connectionID string, subject string, msgType string, status string, duration time.Duration) {
+	m.outboundNATSReplyDuration.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status).Observe(duration.Seconds())
 }
 
-func (m *Metrics) IncOutboundErrors(subject string, msgType string, errorType string) {
-	m.outboundErrorsTotal.WithLabelValues(subject, msgType, errorType).Inc()
+func (m *Metrics) IncOutboundErrors(connectionID string, subject string, msgType string, errorType string) {
+	m.outboundErrorsTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, errorType).Inc()
 }
 
-func (m *Metrics) IncOutboundTimeout(subject string, msgType string, stage string) {
-	m.outboundTimeoutTotal.WithLabelValues(subject, msgType, stage).Inc()
+func (m *Metrics) IncOutboundTimeout(connectionID string, subject string, msgType string, stage string) {
+	m.outboundTimeoutTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, stage).Inc()
 }
 
-func (m *Metrics) IncOutboundUnmatchedResponse(msgType string) {
-	m.outboundUnmatchedResponseTotal.WithLabelValues(msgType).Inc()
+func (m *Metrics) IncOutboundUnmatchedResponse(connectionID string, msgType string) {
+	m.outboundUnmatchedResponseTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType).Inc()
 }
 
-func (m *Metrics) IncOutboundWorkerTasks(status string) {
-	m.outboundWorkerTasksTotal.WithLabelValues(status).Inc()
+func (m *Metrics) IncOutboundWorkerTasks(connectionID string, status string) {
+	m.outboundWorkerTasksTotal.WithLabelValues(normalizeConnectionID(connectionID), status).Inc()
 }
 
-func (m *Metrics) ObserveOutboundQueueWaitDuration(duration time.Duration) {
-	m.outboundQueueWaitDurationSeconds.Observe(duration.Seconds())
+func (m *Metrics) ObserveOutboundQueueWaitDuration(connectionID string, duration time.Duration) {
+	m.outboundQueueWaitDurationSeconds.WithLabelValues(normalizeConnectionID(connectionID)).Observe(duration.Seconds())
+}
+
+func normalizeConnectionID(connectionID string) string {
+	if connectionID == "" {
+		return "unknown"
+	}
+	return connectionID
 }

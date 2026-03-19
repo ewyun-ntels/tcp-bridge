@@ -196,7 +196,7 @@ type KeyListEntry struct {
 type HandshakeResponse struct {
 	SysID        string         `json:"sys-id"`        // 응답하는 Peer Name
 	Code         int            `json:"code"`          // 결과 코드 (200=성공)
-	PingInterval int            `json:"ping-interval"` // Ping 메시지 전송 주기 (초)
+	PingInterval int            `json:"ping-interval"` // Ping 메시지 전송 주기 (초, optional: 미존재 시 기본 5초)
 	KeyList      []KeyListEntry `json:"keyList"`       // 암호화 key 목록 (optional)
 	Cause        string         `json:"cause"`         // 실패 시 상세 사유 (optional)
 }

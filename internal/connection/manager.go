@@ -33,6 +33,7 @@ type ConnectionManager struct {
 
 	// 연결 상태 및 품질 변경 시 호출되는 콜백 (메트릭 수집 등에 사용)
 	onStateChange      func(connID string, endpoint string, state string)
+	onHandshakeAck     func(connID string, endpoint string, sysID string)
 	onConnectAttempt   func(connID string)
 	onConnectSuccess   func(connID string)
 	onConnectFailure   func(connID string, reason string)
@@ -123,10 +124,15 @@ func NewConnectionManager(logger *slog.Logger, cfg *config.TCPConfig) *Connectio
 		connID := fmt.Sprintf("conn_%d", endpoint.Priority)
 		//endpointAddr := fmt.Sprintf("%s:%d", endpoint.Host, endpoint.Port)
 		conn := NewConnMgr(connID, logger.With(
-			//"conn", connID,
+			"conn", connID,
 			"priority", endpoint.Priority,
 		), cfg, endpoint)
-		conn.onHandshakeResponse = cm.store.Save
+		conn.onHandshakeResponse = func(sysID string, payload json.RawMessage) {
+			cm.store.Save(sysID, payload)
+			if cm.onHandshakeAck != nil {
+				cm.onHandshakeAck(connID, endpoint.Address(), sysID)
+			}
+		}
 
 		// Priority 순서대로 저장 (index = priority)
 		if endpoint.Priority >= 0 && endpoint.Priority < len(cfg.Endpoints) {
@@ -350,6 +356,10 @@ func (cm *ConnectionManager) SetFrameReadCallback(callback func(frame *config.Fr
 // SetStateChangeCallback sets the callback for state changes
 func (cm *ConnectionManager) SetStateChangeCallback(callback func(connID string, endpoint string, state string)) {
 	cm.onStateChange = callback
+}
+
+func (cm *ConnectionManager) SetHandshakeAckCallback(callback func(connID string, endpoint string, sysID string)) {
+	cm.onHandshakeAck = callback
 }
 
 func (cm *ConnectionManager) SetConnectAttemptCallback(callback func(connID string)) {
@@ -626,11 +636,16 @@ func (c *ConnMgr) performHandshake() error {
 	var ackResp struct {
 		SysID        string `json:"sys-id"`
 		Code         int    `json:"code"`
-		PingInterval int    `json:"ping-interval"`
+		PingInterval *int   `json:"ping-interval"`
 		Cause        string `json:"cause"`
 	}
 	if err := json.Unmarshal(payload, &ackResp); err != nil {
 		return fmt.Errorf("failed to unmarshal ack response: %w", err)
+	}
+
+	pingIntervalSec := 5
+	if ackResp.PingInterval != nil {
+		pingIntervalSec = *ackResp.PingInterval
 	}
 
 	// Check response code
@@ -641,16 +656,19 @@ func (c *ConnMgr) performHandshake() error {
 			"code", ackResp.Code,
 			"cause", ackResp.Cause,
 			"payload", string(payload))
-		return fmt.Errorf("handshake failed with code %d: %s", ackResp.Code, ackResp.Cause)
+		if ackResp.Cause != "" {
+			return fmt.Errorf("handshake failed with code %d: %s", ackResp.Code, ackResp.Cause)
+		}
+		return fmt.Errorf("handshake failed with code %d", ackResp.Code)
 	}
 
 	if c.onHandshakeResponse != nil {
 		c.onHandshakeResponse(ackResp.SysID, payload)
 	}
 
-	// Store ping interval if provided
-	if ackResp.PingInterval > 0 {
-		rawInterval := time.Duration(ackResp.PingInterval) * time.Second
+	// Apply default ping interval when the optional field is omitted.
+	if pingIntervalSec > 0 {
+		rawInterval := time.Duration(pingIntervalSec) * time.Second
 		effectiveInterval := rawInterval - c.config.PingIntervalMargin
 		if effectiveInterval <= 0 {
 			effectiveInterval = time.Second
@@ -660,8 +678,9 @@ func (c *ConnMgr) performHandshake() error {
 		c.pingInterval = effectiveInterval
 		c.mu.Unlock()
 		c.logger.Info("received ping interval",
-			"interval", ackResp.PingInterval,
-			"seconds", ackResp.PingInterval,
+			"interval", pingIntervalSec,
+			"seconds", pingIntervalSec,
+			"default_applied", ackResp.PingInterval == nil,
 			"margin", c.config.PingIntervalMargin.String(),
 			"effective_interval", effectiveInterval.String())
 	}
@@ -673,7 +692,7 @@ func (c *ConnMgr) performHandshake() error {
 	c.logger.Info("<<< HELLO-RESP received",
 		"tid", binary.BigEndian.Uint32(header[4:8]),
 		"peer-sys-id", ackResp.SysID,
-		"ping-interval", ackResp.PingInterval)
+		"ping-interval", pingIntervalSec)
 
 	return nil
 }
@@ -787,9 +806,10 @@ func (c *ConnMgr) readLoop() {
 
 		// Handle ping/pong frames (do not update activity for keep-alive messages)
 		if frame.IsPing() {
-			if frameType == config.FrameTypePing {
+			switch frameType {
+			case config.FrameTypePing:
 				c.logger.Warn("unexpected PING-REQ received", "tid", tid)
-			} else if frameType == config.FrameTypePong {
+			case config.FrameTypePong:
 				// Received PONG, clear awaiting flag
 				c.activityMu.Lock()
 				c.awaitingPong = false

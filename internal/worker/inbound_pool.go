@@ -68,15 +68,15 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 	startedAt := time.Now()
 	finalStatus := "error"
 	defer func() {
-		p.handler.metrics.IncInboundWorkerTasks(finalStatus)
-		p.handler.metrics.AddInboundInflight(msgType, -1)
+		p.handler.metrics.IncInboundWorkerTasks(frame.ConnectionID, finalStatus)
+		p.handler.metrics.AddInboundInflight(frame.ConnectionID, msgType, -1)
 		if !frame.ReceivedAt.IsZero() {
-			p.handler.metrics.ObserveInboundEndToEndDuration(msgType, finalStatus, time.Since(frame.ReceivedAt))
+			p.handler.metrics.ObserveInboundEndToEndDuration(frame.ConnectionID, msgType, finalStatus, time.Since(frame.ReceivedAt))
 		}
 	}()
 
 	if !frame.EnqueuedAt.IsZero() {
-		p.handler.metrics.ObserveInboundQueueWaitDuration(time.Since(frame.EnqueuedAt))
+		p.handler.metrics.ObserveInboundQueueWaitDuration(frame.ConnectionID, time.Since(frame.EnqueuedAt))
 	}
 
 	if !p.handler.natsConfig.MessageTypeRouting.IsInboundRequestType(frame.Type) {
@@ -88,8 +88,8 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		logger.Error("unknown message type, dropping",
 			"msg_type", msgType,
 			"connection_id", frame.ConnectionID)
-		p.handler.metrics.IncInboundErrors(msgType, "invalid_message_type")
-		p.handler.metrics.IncInboundResponses(msgType, "dropped")
+		p.handler.metrics.IncInboundErrors(frame.ConnectionID, msgType, "invalid_message_type")
+		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, "dropped")
 		finalStatus = "dropped"
 		return
 	}
@@ -123,40 +123,40 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 		if errors.Is(err, nats.ErrTimeout) {
 			finalStatus = "timeout"
-			p.handler.metrics.IncInboundErrors(msgType, "nats_timeout")
-			p.handler.metrics.IncInboundTimeout(msgType, "nats_wait")
-			p.handler.metrics.IncInboundTimeout(msgType, "overall")
-			p.handler.metrics.ObserveInboundNATSRequestDuration(msgType, "timeout", time.Since(natsStartedAt))
+			p.handler.metrics.IncInboundErrors(frame.ConnectionID, msgType, "nats_timeout")
+			p.handler.metrics.IncInboundTimeout(frame.ConnectionID, msgType, "nats_wait")
+			p.handler.metrics.IncInboundTimeout(frame.ConnectionID, msgType, "overall")
+			p.handler.metrics.ObserveInboundNATSRequestDuration(frame.ConnectionID, msgType, "timeout", time.Since(natsStartedAt))
 		} else {
 			finalStatus = "error"
-			p.handler.metrics.IncInboundErrors(msgType, "nats_error")
-			p.handler.metrics.ObserveInboundNATSRequestDuration(msgType, "error", time.Since(natsStartedAt))
+			p.handler.metrics.IncInboundErrors(frame.ConnectionID, msgType, "nats_error")
+			p.handler.metrics.ObserveInboundNATSRequestDuration(frame.ConnectionID, msgType, "error", time.Since(natsStartedAt))
 		}
 
 		writeStartedAt := time.Now()
 		writeErr := p.handler.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "internal error")
-		p.handler.metrics.ObserveInboundResponseWriteDuration(msgType, finalStatus, time.Since(writeStartedAt))
+		p.handler.metrics.ObserveInboundResponseWriteDuration(frame.ConnectionID, msgType, finalStatus, time.Since(writeStartedAt))
 		if writeErr != nil {
-			p.handler.metrics.IncInboundErrors(msgType, classifyInboundWriteError(writeErr))
+			p.handler.metrics.IncInboundErrors(frame.ConnectionID, msgType, classifyInboundWriteError(writeErr))
 		}
-		p.handler.metrics.IncInboundResponses(msgType, finalStatus)
+		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, finalStatus)
 		return
 	}
 
-	p.handler.metrics.ObserveInboundNATSRequestDuration(msgType, "success", time.Since(natsStartedAt))
+	p.handler.metrics.ObserveInboundNATSRequestDuration(frame.ConnectionID, msgType, "success", time.Since(natsStartedAt))
 	logger.Debug("received NATS response", "subject", subject, "response_size", len(response))
 	writeStartedAt := time.Now()
 	if err := p.handler.sendTCPResponseToConnection(frame.ConnectionID, frame.TID, responseType, response); err != nil {
 		logger.Error("failed to send TCP response", "error", err, "elapsed_ms", time.Since(startedAt).Milliseconds())
 		finalStatus = "error"
-		p.handler.metrics.ObserveInboundResponseWriteDuration(msgType, "error", time.Since(writeStartedAt))
-		p.handler.metrics.IncInboundErrors(msgType, classifyInboundWriteError(err))
-		p.handler.metrics.IncInboundResponses(msgType, "error")
+		p.handler.metrics.ObserveInboundResponseWriteDuration(frame.ConnectionID, msgType, "error", time.Since(writeStartedAt))
+		p.handler.metrics.IncInboundErrors(frame.ConnectionID, msgType, classifyInboundWriteError(err))
+		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, "error")
 		p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 		return
 	}
-	p.handler.metrics.ObserveInboundResponseWriteDuration(msgType, "success", time.Since(writeStartedAt))
-	p.handler.metrics.IncInboundResponses(msgType, "success")
+	p.handler.metrics.ObserveInboundResponseWriteDuration(frame.ConnectionID, msgType, "success", time.Since(writeStartedAt))
+	p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, "success")
 	finalStatus = "success"
 	p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 }

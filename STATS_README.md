@@ -22,6 +22,14 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
   - `1`: connecting
   - `2`: ready
 
+### `tcp_bridge_connection_info`
+- Type: `gauge`
+- Labels: `connection_id`, `endpoint`, `peer_sys_id`
+- Meaning: HELLO ACK에서 학습한 상대 peer sys-id를 담는 metadata 메트릭입니다.
+- Values:
+  - `1`: 현재 connection_id에 매핑된 최신 peer 정보
+  - `0`: 같은 connection_id에서 이전에 사용되던 peer 정보
+
 ### `tcp_bridge_selected_connection`
 - Type: `gauge`
 - Labels: `connection_id`
@@ -88,6 +96,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 ## Connection Operational Notes
 
 - `connection_state` 와 `selected_connection` 을 같이 보면 현재 선택된 primary/master 회선과 standby 회선을 구분할 수 있습니다.
+- 상대 peer 식별이 필요하면 `connection_info`를 `connection_id` 기준으로 다른 connection 메트릭과 함께 조회하는 편이 가장 안전합니다.
 - `connection_attempts_total - connection_success_total` 차이가 계속 커지면 연결 자체가 불안정한 상태일 가능성이 큽니다.
 - `disconnects_total{reason="ping_timeout"}` 이 증가하면 peer 응답 정지 또는 네트워크 단절 가능성을 먼저 확인하는 편이 좋습니다.
 - `failover_total` 이 짧은 시간에 반복 증가하면 active 회선 flap 상황일 수 있습니다.
@@ -96,12 +105,12 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_inbound_requests_total`
 - Type: `counter`
-- Labels: `msg_type`
+- Labels: `connection_id`, `msg_type`
 - Meaning: TCP에서 수신한 inbound business request 총 개수입니다.
 
 ### `tcp_bridge_inbound_responses_total`
 - Type: `counter`
-- Labels: `msg_type`, `status`
+- Labels: `connection_id`, `msg_type`, `status`
 - Meaning: inbound 요청의 최종 처리 결과 총 개수입니다.
 - Common `status` values:
   - `success`
@@ -111,27 +120,27 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_inbound_inflight_requests`
 - Type: `gauge`
-- Labels: `msg_type`
+- Labels: `connection_id`, `msg_type`
 - Meaning: 현재 처리 중인 inbound 요청 수입니다.
 
 ### `tcp_bridge_inbound_end_to_end_duration_seconds`
 - Type: `histogram`
-- Labels: `msg_type`, `status`
+- Labels: `connection_id`, `msg_type`, `status`
 - Meaning: TCP inbound 요청 수신부터 최종 TCP 응답 처리까지의 end-to-end 시간입니다.
 
 ### `tcp_bridge_inbound_nats_request_duration_seconds`
 - Type: `histogram`
-- Labels: `msg_type`, `status`
+- Labels: `connection_id`, `msg_type`, `status`
 - Meaning: inbound 요청이 NATS request/reply 구간에서 소비한 시간입니다.
 
 ### `tcp_bridge_inbound_response_write_duration_seconds`
 - Type: `histogram`
-- Labels: `msg_type`, `status`
+- Labels: `connection_id`, `msg_type`, `status`
 - Meaning: 원래 TCP connection 으로 응답을 쓰는 데 걸린 시간입니다.
 
 ### `tcp_bridge_inbound_errors_total`
 - Type: `counter`
-- Labels: `msg_type`, `error_type`
+- Labels: `connection_id`, `msg_type`, `error_type`
 - Meaning: inbound 처리 중 발생한 에러 총 개수입니다.
 - Common `error_type` values:
   - `nats_timeout`
@@ -143,7 +152,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_inbound_timeout_total`
 - Type: `counter`
-- Labels: `msg_type`, `stage`
+- Labels: `connection_id`, `msg_type`, `stage`
 - Meaning: inbound 처리 중 timeout 발생 횟수입니다.
 - Common `stage` values:
   - `nats_wait`
@@ -151,12 +160,12 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_inbound_unmatched_response_total`
 - Type: `counter`
-- Labels: `msg_type`
+- Labels: `connection_id`, `msg_type`
 - Meaning: inflight 만료 등으로 정상 completion 과 매칭되지 못한 inbound 요청 수입니다.
 
 ### `tcp_bridge_inbound_worker_tasks_total`
 - Type: `counter`
-- Labels: `status`
+- Labels: `connection_id`, `status`
 - Meaning: inbound worker 가 완료한 작업 수입니다.
 - Common `status` values:
   - `success`
@@ -166,6 +175,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_inbound_queue_wait_duration_seconds`
 - Type: `histogram`
+- Labels: `connection_id`
 - Meaning: inbound 요청이 worker queue 에서 대기한 시간입니다.
 
 ## Inbound Operational Notes
@@ -179,12 +189,12 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_outbound_requests_total`
 - Type: `counter`
-- Labels: `subject`, `msg_type`
+- Labels: `connection_id`, `subject`, `msg_type`
 - Meaning: NATS에서 수신한 outbound request 총 개수입니다.
 
 ### `tcp_bridge_outbound_responses_total`
 - Type: `counter`
-- Labels: `subject`, `msg_type`, `status`
+- Labels: `connection_id`, `subject`, `msg_type`, `status`
 - Meaning: outbound 요청의 최종 처리 결과 총 개수입니다.
 - Common `status` values:
   - `success`
@@ -194,27 +204,27 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_outbound_inflight_requests`
 - Type: `gauge`
-- Labels: `subject`, `msg_type`
+- Labels: `connection_id`, `subject`, `msg_type`
 - Meaning: 현재 처리 중인 outbound 요청 수입니다.
 
 ### `tcp_bridge_outbound_end_to_end_duration_seconds`
 - Type: `histogram`
-- Labels: `subject`, `msg_type`, `status`
+- Labels: `connection_id`, `subject`, `msg_type`, `status`
 - Meaning: NATS 요청 수신부터 최종 NATS reply 발행까지의 end-to-end 시간입니다.
 
 ### `tcp_bridge_outbound_tcp_response_wait_duration_seconds`
 - Type: `histogram`
-- Labels: `subject`, `msg_type`, `status`
+- Labels: `connection_id`, `subject`, `msg_type`, `status`
 - Meaning: TCP 요청 전송 후 TCP 응답을 기다리는 시간입니다.
 
 ### `tcp_bridge_outbound_nats_reply_duration_seconds`
 - Type: `histogram`
-- Labels: `subject`, `msg_type`, `status`
+- Labels: `connection_id`, `subject`, `msg_type`, `status`
 - Meaning: 최종 NATS reply 를 발행하는 데 걸린 시간입니다.
 
 ### `tcp_bridge_outbound_errors_total`
 - Type: `counter`
-- Labels: `subject`, `msg_type`, `error_type`
+- Labels: `connection_id`, `subject`, `msg_type`, `error_type`
 - Meaning: outbound 처리 중 발생한 에러 총 개수입니다.
 - Common `error_type` values:
   - `unknown_subject`
@@ -229,7 +239,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_outbound_timeout_total`
 - Type: `counter`
-- Labels: `subject`, `msg_type`, `stage`
+- Labels: `connection_id`, `subject`, `msg_type`, `stage`
 - Meaning: outbound 처리 중 timeout 발생 횟수입니다.
 - Common `stage` values:
   - `tcp_wait`
@@ -237,12 +247,12 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_outbound_unmatched_response_total`
 - Type: `counter`
-- Labels: `msg_type`
+- Labels: `connection_id`, `msg_type`
 - Meaning: inflight entry 와 정상 매칭되지 못한 outbound TCP 응답 수입니다.
 
 ### `tcp_bridge_outbound_worker_tasks_total`
 - Type: `counter`
-- Labels: `status`
+- Labels: `connection_id`, `status`
 - Meaning: outbound worker 가 완료한 작업 수입니다.
 - Common `status` values:
   - `success`
@@ -252,6 +262,7 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 
 ### `tcp_bridge_outbound_queue_wait_duration_seconds`
 - Type: `histogram`
+- Labels: `connection_id`
 - Meaning: outbound 요청이 worker queue 에서 대기한 시간입니다.
 
 ## Outbound Operational Notes
@@ -260,3 +271,4 @@ TCP Bridge에서 사용하는 Prometheus 메트릭을 정리한 문서입니다.
 - `outbound_tcp_response_wait_duration_seconds` 가 증가하면 TCP peer 응답 지연 또는 failover/retry 증가를 먼저 확인하는 편이 좋습니다.
 - `outbound_queue_wait_duration_seconds` 와 `outbound_inflight_requests` 가 함께 증가하면 outbound worker 수나 queue size 조정이 필요할 수 있습니다.
 - `outbound_timeout_total{stage="tcp_wait"}` 이 증가하면 TCP response timeout 설정과 peer 응답 시간을 먼저 확인하는 편이 좋습니다.
+- outbound 요청은 연결 선택 전 단계가 있으므로 일부 시계열은 `connection_id="unknown"` 라벨로 보일 수 있습니다.

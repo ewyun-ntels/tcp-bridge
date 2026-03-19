@@ -76,19 +76,21 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	msg := job.msg
 	logger := p.logger.With("subject", msg.Subject, "reply", msg.Reply)
 	logger.Debug("processing external request")
+	metricsConnectionID := ""
+	inflightConnectionID := ""
 	if !job.enqueuedAt.IsZero() {
-		p.handler.metrics.ObserveOutboundQueueWaitDuration(time.Since(job.enqueuedAt))
+		p.handler.metrics.ObserveOutboundQueueWaitDuration(metricsConnectionID, time.Since(job.enqueuedAt))
 	}
 	finalStatus := "error"
 	subject := msg.Subject
 	msgTypeLabel := "unknown"
 	defer func() {
-		p.handler.metrics.IncOutboundWorkerTasks(finalStatus)
+		p.handler.metrics.IncOutboundWorkerTasks(metricsConnectionID, finalStatus)
 		if msgTypeLabel != "unknown" {
-			p.handler.metrics.AddOutboundInflight(subject, msgTypeLabel, -1)
+			p.handler.metrics.AddOutboundInflight(inflightConnectionID, subject, msgTypeLabel, -1)
 		}
 		if !job.receivedAt.IsZero() {
-			p.handler.metrics.ObserveOutboundEndToEndDuration(subject, msgTypeLabel, finalStatus, time.Since(job.receivedAt))
+			p.handler.metrics.ObserveOutboundEndToEndDuration(metricsConnectionID, subject, msgTypeLabel, finalStatus, time.Since(job.receivedAt))
 		}
 	}()
 
@@ -104,16 +106,16 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	msgType, expectedRespType, ok := p.handler.resolveOutboundRoute(msg.Subject)
 	if !ok {
 		logger.Error("unknown NATS subject for NATS->TCP flow", "subject", msg.Subject)
-		p.handler.metrics.IncOutboundErrors(subject, msgTypeLabel, "unknown_subject")
-		p.handler.metrics.IncOutboundRequests(subject, msgTypeLabel)
-		p.handler.metrics.IncOutboundResponses(subject, msgTypeLabel, "dropped")
+		p.handler.metrics.IncOutboundErrors(metricsConnectionID, subject, msgTypeLabel, "unknown_subject")
+		p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
+		p.handler.metrics.IncOutboundResponses(metricsConnectionID, subject, msgTypeLabel, "dropped")
 		finalStatus = "dropped"
 		p.handler.replyError(msg, "unknown NATS subject")
 		return
 	}
 	msgTypeLabel = formatMsgType(msgType)
-	p.handler.metrics.IncOutboundRequests(subject, msgTypeLabel)
-	p.handler.metrics.AddOutboundInflight(subject, msgTypeLabel, 1)
+	p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
+	p.handler.metrics.AddOutboundInflight(inflightConnectionID, subject, msgTypeLabel, 1)
 
 	frame := &config.Frame{
 		Type:    msgType,
@@ -142,24 +144,27 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 		"expected_response_type", formatMsgType(expectedRespType),
 		"deadline_seconds", totalTimeout.Seconds())
 
-	success, status, errorType := p.sendAndWaitWithRetry(frame, inflightEntry, logger)
+	success, status, errorType, selectedConnectionID := p.sendAndWaitWithRetry(frame, inflightEntry, logger)
+	if selectedConnectionID != "" {
+		metricsConnectionID = selectedConnectionID
+	}
 	if !success {
 		logger.Error("all connection attempts failed", "tid", tid)
 		p.handler.inflightMgr.GetInflightA().Remove(tid)
-		p.handler.metrics.IncOutboundResponses(subject, msgTypeLabel, status)
+		p.handler.metrics.IncOutboundResponses(metricsConnectionID, subject, msgTypeLabel, status)
 		finalStatus = status
 		if errorType != "" {
-			p.handler.metrics.IncOutboundErrors(subject, msgTypeLabel, errorType)
+			p.handler.metrics.IncOutboundErrors(metricsConnectionID, subject, msgTypeLabel, errorType)
 		}
 		if status == "timeout" {
-			p.handler.metrics.IncOutboundTimeout(subject, msgTypeLabel, "tcp_wait")
-			p.handler.metrics.IncOutboundTimeout(subject, msgTypeLabel, "overall")
+			p.handler.metrics.IncOutboundTimeout(metricsConnectionID, subject, msgTypeLabel, "tcp_wait")
+			p.handler.metrics.IncOutboundTimeout(metricsConnectionID, subject, msgTypeLabel, "overall")
 		}
 		p.handler.replyError(msg, "all TCP connections failed or timeout")
 		return
 	}
 
-	p.handler.metrics.IncOutboundResponses(subject, msgTypeLabel, "success")
+	p.handler.metrics.IncOutboundResponses(metricsConnectionID, subject, msgTypeLabel, "success")
 	finalStatus = "success"
 	logger.Debug("request processed successfully", "tid", tid)
 }
@@ -168,7 +173,7 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 	frame *config.Frame,
 	inflightEntry *inflight.InflightEntryA,
 	logger *slog.Logger,
-) (bool, string, string) {
+) (bool, string, string, string) {
 	connections := p.handler.connMgr.GetConnections()
 	retryAttempts := p.config.RetryAttempts
 	responseTimeout := p.config.ResponseTimeout
@@ -176,6 +181,7 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 	subject := inflightEntry.Subject
 	msgTypeLabel := formatMsgType(frame.Type)
 	lastErrorType := ""
+	lastConnectionID := ""
 	timedOut := false
 	readyConnectionSeen := false
 
@@ -196,6 +202,7 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 		readyConnectionSeen = true
 
 		for attempt := 1; attempt <= retryAttempts; attempt++ {
+			lastConnectionID = conn.ID()
 			logger.Info("attempting TCP send",
 				"tid", frame.TID,
 				"msg_type", msgTypeLabel,
@@ -208,7 +215,7 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 			data, err := frame.Serialize()
 			if err != nil {
 				logger.Error("failed to serialize frame", "tid", frame.TID, "error", err)
-				return false, "error", "serialize_error"
+				return false, "error", "serialize_error", lastConnectionID
 			}
 
 			bytesWritten, err := conn.Write(data)
@@ -246,7 +253,7 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 
 			select {
 			case responseFrame := <-inflightEntry.ResponseChan:
-				p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(subject, msgTypeLabel, "success", time.Since(startedAt))
+				p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(responseFrame.ConnectionID, subject, msgTypeLabel, "success", time.Since(startedAt))
 				logger.Info("received TCP response",
 					"tid", frame.TID,
 					"connection_id", responseFrame.ConnectionID,
@@ -258,14 +265,14 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 				replyPublisher := p.handler.natsClient.GetReplyPublisher()
 				replyStartedAt := time.Now()
 				if err := replyPublisher.PublishReply(inflightEntry.ReplySubject, responseFrame.Payload); err != nil {
-					p.handler.metrics.ObserveOutboundNATSReplyDuration(subject, msgTypeLabel, "error", time.Since(replyStartedAt))
+					p.handler.metrics.ObserveOutboundNATSReplyDuration(responseFrame.ConnectionID, subject, msgTypeLabel, "error", time.Since(replyStartedAt))
 					logger.Error("failed to send NATS reply", "tid", frame.TID, "error", err)
-					return false, "error", "reply_publish_error"
+					return false, "error", "reply_publish_error", responseFrame.ConnectionID
 				}
-				p.handler.metrics.ObserveOutboundNATSReplyDuration(subject, msgTypeLabel, "success", time.Since(replyStartedAt))
+				p.handler.metrics.ObserveOutboundNATSReplyDuration(responseFrame.ConnectionID, subject, msgTypeLabel, "success", time.Since(replyStartedAt))
 
 				logger.Debug("sent NATS reply (payload only)", "tid", frame.TID, "size", len(responseFrame.Payload))
-				return true, "success", ""
+				return true, "success", "", responseFrame.ConnectionID
 
 			case <-time.After(responseTimeout):
 				timedOut = true
@@ -299,8 +306,8 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 	}
 
 	if timedOut {
-		p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(subject, msgTypeLabel, "timeout", time.Since(startedAt))
-		return false, "timeout", "tcp_response_timeout"
+		p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(lastConnectionID, subject, msgTypeLabel, "timeout", time.Since(startedAt))
+		return false, "timeout", "tcp_response_timeout", lastConnectionID
 	}
 	if !readyConnectionSeen && lastErrorType == "" {
 		lastErrorType = "no_ready_connection"
@@ -308,8 +315,8 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 	if lastErrorType == "" {
 		lastErrorType = "tcp_write_error"
 	}
-	p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(subject, msgTypeLabel, "error", time.Since(startedAt))
-	return false, "error", lastErrorType
+	p.handler.metrics.ObserveOutboundTCPResponseWaitDuration(lastConnectionID, subject, msgTypeLabel, "error", time.Since(startedAt))
+	return false, "error", lastErrorType, lastConnectionID
 }
 
 func classifyOutboundWriteError(err error) string {

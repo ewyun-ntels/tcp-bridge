@@ -143,6 +143,9 @@ func (a *App) initializeComponents() {
 	a.connMgr.SetStateChangeCallback(func(connID string, endpoint string, state string) {
 		a.metrics.SetConnectionState(connID, endpoint, state)
 	})
+	a.connMgr.SetHandshakeAckCallback(func(connID string, endpoint string, sysID string) {
+		a.metrics.SetConnectionInfo(connID, endpoint, sysID)
+	})
 	a.connMgr.SetConnectAttemptCallback(a.metrics.IncConnectionAttempts)
 	a.connMgr.SetConnectSuccessCallback(a.metrics.IncConnectionSuccess)
 	a.connMgr.SetConnectFailureCallback(a.metrics.IncConnectionFailure)
@@ -266,10 +269,10 @@ func (a *App) handleTCPRequest(frame *config.Frame) {
 	frame.ReceivedAt = time.Now()
 
 	// Update metrics
-	a.metrics.IncTCPFramesReceived("request")
+	a.metrics.IncTCPFramesReceivedForConnection(frame.ConnectionID, "request")
 	msgType := fmt.Sprintf("0x%02x", frame.Type)
-	a.metrics.IncInboundRequests(msgType)
-	a.metrics.AddInboundInflight(msgType, 1)
+	a.metrics.IncInboundRequests(frame.ConnectionID, msgType)
+	a.metrics.AddInboundInflight(frame.ConnectionID, msgType, 1)
 
 	// Dispatch to bridge handler via frame dispatcher
 	a.frameDispatcher.DispatchRequestFrame(frame)
@@ -280,11 +283,11 @@ func (a *App) handleTCPResponse(frame *config.Frame) {
 	a.logger.Debug("handling TCP response", "tid", frame.TID)
 
 	// Update metrics
-	a.metrics.IncTCPFramesReceived("response")
+	a.metrics.IncTCPFramesReceivedForConnection(frame.ConnectionID, "response")
 
 	// Match with inflight-A entries (NATS→TCP responses)
 	if handled := a.inflightMgr.GetInflightA().HandleResponse(frame); !handled {
-		a.metrics.IncOutboundUnmatchedResponse(fmt.Sprintf("0x%02x", frame.Type))
+		a.metrics.IncOutboundUnmatchedResponse(frame.ConnectionID, fmt.Sprintf("0x%02x", frame.Type))
 		a.logger.Warn("dropping unmatched TCP response",
 			"tid", frame.TID,
 			"connection_id", frame.ConnectionID,
