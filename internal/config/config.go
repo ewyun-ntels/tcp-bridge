@@ -74,7 +74,7 @@ type TCPConfig struct {
 
 	// Hello/ACK handshake
 	HandshakeTimeout time.Duration `yaml:"handshake_timeout"` // HELLO/ACK handshake timeout
-	SysID            string        `yaml:"sys_id"`            // 접속하는 Peer Name
+	SysPrefixID      string        `yaml:"sys_prefix_id"`      // Peer Name Prefix (StatefulSet에서 index가 추가됨)
 	BranchName       string        `yaml:"branch_name"`       // 국사명 (SS/DS/BR)
 
 	// Ping/Pong

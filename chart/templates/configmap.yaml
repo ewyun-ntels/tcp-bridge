@@ -1,0 +1,55 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "tcp-bridge.fullname" . }}-config
+  labels:
+    {{- include "tcp-bridge.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    server:
+      name: {{ .Values.config.server.name | quote }}
+      version: {{ .Values.config.server.version | quote }}
+      environment: {{ .Values.config.server.environment | quote }}
+      shutdown_timeout: {{ .Values.config.server.shutdown_timeout | quote }}
+
+    tcp:
+      endpoints:
+        {{- toYaml .Values.config.tcp.endpoints | nindent 8 }}
+      connect_timeout: {{ .Values.config.tcp.connect_timeout | quote }}
+      write_timeout: {{ .Values.config.tcp.write_timeout | quote }}
+      keep_alive: {{ .Values.config.tcp.keep_alive | quote }}
+      max_frame_size: {{ .Values.config.tcp.max_frame_size }}
+      frame_header_size: {{ .Values.config.tcp.frame_header_size }}
+      handshake_timeout: {{ .Values.config.tcp.handshake_timeout | quote }}
+      ping_timeout: {{ .Values.config.tcp.ping_timeout | quote }}
+      ping_interval_margin: {{ .Values.config.tcp.ping_interval_margin | quote }}
+      sys_prefix_id: {{ .Values.config.tcp.sys_prefix_id | quote }}
+      branch_name: {{ .Values.config.tcp.branch_name | quote }}
+
+    nats:
+      urls:
+        {{- toYaml .Values.config.nats.urls | nindent 8 }}
+      connect_timeout: {{ .Values.config.nats.connect_timeout | quote }}
+      message_type_routing:
+        {{- toYaml .Values.config.nats.message_type_routing | nindent 8 }}
+
+    message_handler:
+      outbound:
+        response_timeout: {{ .Values.config.message_handler.outbound.response_timeout | quote }}
+        retry_attempts: {{ .Values.config.message_handler.outbound.retry_attempts }}
+        worker_count: {{ .Values.config.message_handler.outbound.worker_count }}
+        queue_size: {{ .Values.config.message_handler.outbound.queue_size }}
+      inbound:
+        timeout: {{ .Values.config.message_handler.inbound.timeout | quote }}
+        worker_count: {{ .Values.config.message_handler.inbound.worker_count }}
+        queue_size: {{ .Values.config.message_handler.inbound.queue_size }}
+
+    metrics:
+      enabled: {{ .Values.config.metrics.enabled }}
+      port: {{ .Values.config.metrics.port }}
+      path: {{ .Values.config.metrics.path | quote }}
+      include_default_metrics: {{ .Values.config.metrics.include_default_metrics }}
+
+    logging:
+      level: {{ .Values.config.logging.level | quote }}
+      format: {{ .Values.config.logging.format | quote }}

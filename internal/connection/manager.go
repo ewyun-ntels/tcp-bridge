@@ -24,6 +24,9 @@ type ConnectionManager struct {
 	config *config.TCPConfig
 	store  *HandshakeStore
 
+	// SysID: StatefulSet index가 결합된 최종 Peer Name
+	sysID string
+
 	// 우선순위 순서로 정렬된 연결 관리자 배열
 	// connections[i]는 priority i를 가진 연결입니다.
 	connections []*ConnMgr
@@ -52,6 +55,9 @@ type ConnMgr struct {
 	logger   *slog.Logger
 	config   *config.TCPConfig
 	endpoint config.TCPEndpoint // 연결할 TCP 엔드포인트
+
+	// SysID: StatefulSet index가 결합된 최종 Peer Name
+	sysID string
 
 	// 연결 상태 (DISCONNECTED, CONNECTING, READY)
 	mu    sync.RWMutex
@@ -386,6 +392,17 @@ func (cm *ConnectionManager) SetActiveConnectionChangeCallback(callback func(fro
 	cm.onActiveConnChange = callback
 }
 
+// SetSysID sets the SysID for all connections
+// This should be called before Start() to set the dynamically generated SysID (prefix + StatefulSet index)
+func (cm *ConnectionManager) SetSysID(sysID string) {
+	cm.sysID = sysID
+	for _, conn := range cm.connections {
+		if conn != nil {
+			conn.sysID = sysID
+		}
+	}
+}
+
 // ListHandshakeResponses returns the latest HELLO responses keyed by peer sys-id.
 func (cm *ConnectionManager) ListHandshakeResponses() []json.RawMessage {
 	return cm.store.List()
@@ -562,7 +579,7 @@ func (c *ConnMgr) performHandshake() error {
 
 	// Prepare HELLO request with sys-id and branch-name
 	helloReq := config.HandshakeRequest{
-		SysID:      c.config.SysID,
+		SysID:      c.sysID, // Use dynamically set SysID
 		BranchName: c.config.BranchName,
 	}
 

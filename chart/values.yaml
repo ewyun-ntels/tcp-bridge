@@ -1,0 +1,170 @@
+# Default values for tcp-bridge
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 2
+
+image:
+  repository: tcp-bridge
+  pullPolicy: IfNotPresent
+  tag: ""
+
+podAnnotations: {}
+
+multus:
+  enabled: false
+  createNAD: true
+  podAnnotations: {}
+  network:
+    name: "tcp-bridge-net"
+    namespace: ""
+    cniVersion: "0.3.1"
+    type: "macvlan"
+    master: "eth0"
+    mode: "bridge"
+    mtu: 0
+    ipam:
+      type: "whereabouts"
+      range: "10.10.10.20/29"
+      rangeStart: "10.10.10.21"
+      rangeEnd: "10.10.10.22"
+      gateway: "10.10.10.1"
+      routes: []
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  allowPrivilegeEscalation: false
+
+service:
+  port: 8080
+
+serviceMonitor:
+  enabled: true
+  labels:
+    release: kube-prometheus-stack
+  interval: 10s
+  scrapeTimeout: 5s
+  namespace: ""
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 100
+      podAffinityTerm:
+        labelSelector:
+          matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+            - tcp-bridge
+        topologyKey: kubernetes.io/hostname
+
+config:
+  server:
+    name: "tcp-bridge"
+    version: "1.0.0"
+    environment: "development"
+    shutdown_timeout: "3s"
+
+  tcp:
+    endpoints:
+      - host: "127.0.0.1"
+        port: 8000
+        priority: 0
+      - host: "127.0.0.1"
+        port: 7000
+        priority: 1
+      - host: "127.0.0.1"
+        port: 7070
+        priority: 2
+    
+    connect_timeout: "2s"
+    write_timeout: "30s"
+    keep_alive: "30s"
+    max_frame_size: 65535
+    frame_header_size: 8
+    handshake_timeout: "10s"
+    ping_timeout: "5s"
+    ping_interval_margin: "0s"
+
+    sys_prefix_id: "tcp-bridge"
+    branch_name: "SS"
+
+  nats:
+    urls:
+      - "nats://nats.upm-messaging.svc.cluster.local:4222"
+    connect_timeout: "5s"
+
+    message_type_routing:
+      outbound:
+        "05":
+          subject: "tcp.subs.change"
+          response_msg_type: "06"
+        "09":
+          subject: "tcp.cellinfo.noti"
+          response_msg_type: "0a"
+      inbound:
+        "07":
+          subject: "tcp.subs.info"
+          response_msg_type: "08"
+        "0b":
+          subject: "tcp.subs.sync"
+          response_msg_type: "0c"
+
+  message_handler:
+    outbound:
+      response_timeout: "5s"
+      retry_attempts: 10
+      worker_count: 20
+      queue_size: 500
+    inbound:
+      timeout: "30s"
+      worker_count: 20
+      queue_size: 500
+
+  metrics:
+    enabled: true
+    port: 8080
+    path: "/metrics"
+    include_default_metrics: false
+
+  logging:
+    level: "info"
+    format: "json"
+
+livenessProbe:
+  httpGet:
+    path: /metrics
+    port: 8080
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /metrics
+    port: 8080
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  successThreshold: 1
+  failureThreshold: 3

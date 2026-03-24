@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -105,6 +107,43 @@ func main() {
 	cancel()
 }
 
+// generateSysID generates the final SysID by combining sys_prefix_id with StatefulSet Pod index
+// For StatefulSet pods (e.g., tcp-bridge-0, tcp-bridge-1), extracts the index and appends it
+// For non-StatefulSet deployments, uses sys_prefix_id as-is
+func (a *App) generateSysID() string {
+	podName := os.Getenv("POD_NAME")
+	if podName == "" {
+		// No POD_NAME, use prefix as-is (for local development)
+		a.logger.Warn("POD_NAME not set, using sys_prefix_id as SysID", "sys_prefix_id", a.config.TCP.SysPrefixID)
+		return a.config.TCP.SysPrefixID
+	}
+
+	// Extract StatefulSet index from pod name (e.g., "tcp-bridge-0" -> "0")
+	// StatefulSet pod naming: <statefulset-name>-<ordinal>
+	parts := strings.Split(podName, "-")
+	if len(parts) < 2 {
+		// Not a StatefulSet pod, use prefix as-is
+		a.logger.Warn("POD_NAME does not match StatefulSet pattern, using sys_prefix_id", 
+			"pod_name", podName, "sys_prefix_id", a.config.TCP.SysPrefixID)
+		return a.config.TCP.SysPrefixID
+	}
+
+	// Last part should be the index
+	index := parts[len(parts)-1]
+	
+	// Validate it's a number
+	if _, err := strconv.Atoi(index); err != nil {
+		// Not a valid index, use prefix as-is
+		a.logger.Warn("POD_NAME index is not numeric, using sys_prefix_id", 
+			"pod_name", podName, "index", index, "sys_prefix_id", a.config.TCP.SysPrefixID)
+		return a.config.TCP.SysPrefixID
+	}
+
+	// Combine prefix with index
+	sysID := fmt.Sprintf("%s-%s", a.config.TCP.SysPrefixID, index)
+	return sysID
+}
+
 // NewApp creates a new application instance
 func NewApp(cfg *config.Config, logger *slog.Logger) *App {
 	app := &App{
@@ -137,6 +176,12 @@ func (a *App) initializeComponents() {
 
 	// Create connection manager
 	a.connMgr = connection.NewConnectionManager(a.logger.With("component", "conn-manager"), &a.config.TCP)
+	
+	// Generate SysID from sys_prefix_id + StatefulSet index
+	sysID := a.generateSysID()
+	a.connMgr.SetSysID(sysID)
+	a.logger.Info("SysID configured", "sys_id", sysID)
+	
 	a.metrics.SetKeyListProvider(a.connMgr.ListHandshakeResponses)
 
 	// Set connection state change callback for metrics
