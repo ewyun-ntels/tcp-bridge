@@ -1,0 +1,90 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "tcp-bridge.fullname" . }}-1
+  labels:
+    {{- include "tcp-bridge.labels" . | nindent 4 }}
+    tcp-bridge-index: "1"
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "tcp-bridge.selectorLabels" . | nindent 6 }}
+      tcp-bridge-index: "1"
+  strategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        {{- if .Values.multus.enabled }}
+        k8s.v1.cni.cncf.io/networks: |
+          [{
+            "name": "{{ .Values.multus.network.name }}",
+            "ips": ["{{ (index .Values.instances 1).ip }}/24"],
+            "gateway": ["{{ .Values.multus.network.ipam.gateway }}"]
+          }]
+        {{- end }}
+        {{- with .Values.multus.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "tcp-bridge.selectorLabels" . | nindent 8 }}
+        tcp-bridge-index: "1"
+    spec:
+      serviceAccountName: {{ include "tcp-bridge.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+      - name: {{ .Chart.Name }}
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        ports:
+        - name: metrics
+          containerPort: {{ .Values.config.metrics.port }}
+          protocol: TCP
+        {{- if .Values.livenessProbe }}
+        livenessProbe:
+          {{- toYaml .Values.livenessProbe | nindent 12 }}
+        {{- end }}
+        {{- if .Values.readinessProbe }}
+        readinessProbe:
+          {{- toYaml .Values.readinessProbe | nindent 12 }}
+        {{- end }}
+        resources:
+          {{- toYaml .Values.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /app/config.yaml
+          subPath: config.yaml
+          readOnly: true
+        env:
+        - name: POD_INDEX
+          value: "1"
+        - name: FIXED_IP
+          value: {{ (index .Values.instances 1).ip | quote }}
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "tcp-bridge.fullname" . }}-config
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

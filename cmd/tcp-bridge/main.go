@@ -107,14 +107,33 @@ func main() {
 	cancel()
 }
 
-// generateSysID generates the final SysID by combining sys_prefix_id with StatefulSet Pod index
-// For StatefulSet pods (e.g., tcp-bridge-0, tcp-bridge-1), extracts the index and appends it
-// For non-StatefulSet deployments, uses sys_prefix_id as-is
+// generateSysID generates the final SysID by combining sys_prefix_id with Pod index
+// Priority:
+// 1. POD_INDEX env var (for Deployment with explicit index)
+// 2. POD_NAME parsing (for StatefulSet compatibility, e.g., tcp-bridge-0 -> 0)
+// 3. sys_prefix_id as-is (for local development)
 func (a *App) generateSysID() string {
+	// 1. Check POD_INDEX first (Deployment with explicit index)
+	podIndex := os.Getenv("POD_INDEX")
+	if podIndex != "" {
+		// Validate it's a number
+		if _, err := strconv.Atoi(podIndex); err != nil {
+			a.logger.Warn("POD_INDEX is not numeric, falling back to POD_NAME", 
+				"pod_index", podIndex)
+		} else {
+			sysID := fmt.Sprintf("%s-%s", a.config.TCP.SysPrefixID, podIndex)
+			a.logger.Info("generated SysID from POD_INDEX", 
+				"sys_id", sysID, "pod_index", podIndex)
+			return sysID
+		}
+	}
+
+	// 2. Fallback: Extract index from POD_NAME (StatefulSet compatibility)
 	podName := os.Getenv("POD_NAME")
 	if podName == "" {
-		// No POD_NAME, use prefix as-is (for local development)
-		a.logger.Warn("POD_NAME not set, using sys_prefix_id as SysID", "sys_prefix_id", a.config.TCP.SysPrefixID)
+		// No POD_INDEX and POD_NAME, use prefix as-is (for local development)
+		a.logger.Warn("POD_INDEX and POD_NAME not set, using sys_prefix_id as SysID", 
+			"sys_prefix_id", a.config.TCP.SysPrefixID)
 		return a.config.TCP.SysPrefixID
 	}
 
@@ -141,6 +160,8 @@ func (a *App) generateSysID() string {
 
 	// Combine prefix with index
 	sysID := fmt.Sprintf("%s-%s", a.config.TCP.SysPrefixID, index)
+	a.logger.Info("generated SysID from POD_NAME", 
+		"sys_id", sysID, "pod_name", podName, "index", index)
 	return sysID
 }
 

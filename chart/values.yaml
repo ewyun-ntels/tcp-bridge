@@ -4,32 +4,38 @@
 
 replicaCount: 2
 
+# Instances configuration for multiple deployments
+instances:
+  - index: 0
+    ip: "192.168.15.20"
+  - index: 1
+    ip: "192.168.15.21"
+
 image:
-  repository: tcp-bridge
+  repository: 192.168.61.145/ewy/tcp-bridge
   pullPolicy: IfNotPresent
-  tag: ""
+  tag: "latest"
 
 podAnnotations: {}
 
 multus:
-  enabled: false
+  enabled: true
   createNAD: true
   podAnnotations: {}
   network:
     name: "tcp-bridge-net"
-    namespace: ""
+    namespace: ""        # 빈값이면, Helm 설치 시 지정한 네임스페이스
     cniVersion: "0.3.1"
     type: "macvlan"
-    master: "eth0"
+    master: "enp1s0"
     mode: "bridge"
     mtu: 0
     ipam:
-      type: "whereabouts"
-      range: "10.10.10.20/29"
-      rangeStart: "10.10.10.21"
-      rangeEnd: "10.10.10.22"
-      gateway: "10.10.10.1"
-      routes: []
+      type: "static"
+      gateway: "192.168.15.1"
+      routes:
+        - dst: "10.10.90.0/24"
+          gw: "192.168.15.1"
 
 podSecurityContext:
   runAsNonRoot: true
@@ -91,9 +97,6 @@ config:
       - host: "127.0.0.1"
         port: 7000
         priority: 1
-      - host: "127.0.0.1"
-        port: 7070
-        priority: 2
     
     connect_timeout: "2s"
     write_timeout: "30s"

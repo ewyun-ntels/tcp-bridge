@@ -1,24 +1,29 @@
 apiVersion: apps/v1
-kind: StatefulSet
+kind: Deployment
 metadata:
-  name: {{ include "tcp-bridge.fullname" . }}
+  name: {{ include "tcp-bridge.fullname" . }}-0
   labels:
     {{- include "tcp-bridge.labels" . | nindent 4 }}
+    tcp-bridge-index: "0"
 spec:
-  serviceName: {{ include "tcp-bridge.fullname" . }}-headless
-  replicas: {{ .Values.replicaCount }}
+  replicas: 1
   selector:
     matchLabels:
       {{- include "tcp-bridge.selectorLabels" . | nindent 6 }}
-  podManagementPolicy: OrderedReady
-  updateStrategy:
+      tcp-bridge-index: "0"
+  strategy:
     type: RollingUpdate
   template:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
         {{- if .Values.multus.enabled }}
-        k8s.v1.cni.cncf.io/networks: {{ .Values.multus.network.name | quote }}
+        k8s.v1.cni.cncf.io/networks: |
+          [{
+            "name": "{{ .Values.multus.network.name }}",
+            "ips": ["{{ (index .Values.instances 0).ip }}/24"],
+            "gateway": ["{{ .Values.multus.network.ipam.gateway }}"]
+          }]
         {{- end }}
         {{- with .Values.multus.podAnnotations }}
         {{- toYaml . | nindent 8 }}
@@ -28,6 +33,7 @@ spec:
         {{- end }}
       labels:
         {{- include "tcp-bridge.selectorLabels" . | nindent 8 }}
+        tcp-bridge-index: "0"
     spec:
       serviceAccountName: {{ include "tcp-bridge.serviceAccountName" . }}
       securityContext:
@@ -58,6 +64,10 @@ spec:
           subPath: config.yaml
           readOnly: true
         env:
+        - name: POD_INDEX
+          value: "0"
+        - name: FIXED_IP
+          value: {{ (index .Values.instances 0).ip | quote }}
         - name: POD_NAME
           valueFrom:
             fieldRef:

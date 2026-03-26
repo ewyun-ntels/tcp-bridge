@@ -18,12 +18,11 @@ spec:
       "mtu": {{ .Values.multus.network.mtu }},
       {{- end }}
       "ipam": {
-        "type": {{ .Values.multus.network.ipam.type | quote }},
-        "range": {{ .Values.multus.network.ipam.range | quote }},
-        "range_start": {{ .Values.multus.network.ipam.rangeStart | quote }},
-        "range_end": {{ .Values.multus.network.ipam.rangeEnd | quote }},
-        "gateway": {{ .Values.multus.network.ipam.gateway | quote }},
+        "type": {{ .Values.multus.network.ipam.type | quote }}
+        {{- if .Values.multus.network.ipam.routes }}
+        ,
         "routes": {{ .Values.multus.network.ipam.routes | toJson }}
+        {{- end }}
       }
     }
 {{- end }}
