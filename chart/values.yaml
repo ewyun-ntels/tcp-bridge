@@ -13,7 +13,7 @@ instances:
 
 image:
   repository: 192.168.61.145/ewy/tcp-bridge
-  pullPolicy: IfNotPresent
+  pullPolicy: Always
   tag: "latest"
 
 podAnnotations: {}
@@ -94,10 +94,10 @@ config:
       - host: "192.168.15.201"
         port: 7000
         priority: 0
-      - host: "192.168.15.202"
+      - host: "192.168.15.201"
         port: 8000
         priority: 1
-      - host: "192.168.15.203"
+      - host: "192.168.15.201"
         port: 9000
         priority: 2
     
@@ -152,12 +152,12 @@ config:
     include_default_metrics: false
 
   logging:
-    level: "info"
+    level: "debug"
     format: "json"
 
   alerta:
     enabled: true
-    url: "http://upm-alarm-alerta.upm-alarm.svc.cluster.local:8080/api"
+    url: "http://upm-alarm-alerta.upm-alarm.svc.cluster.local:8080/api/alert"
     timeout: "3s"
     environment: "Development"
     alerts:

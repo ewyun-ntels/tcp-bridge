@@ -122,11 +122,11 @@ func (a *App) generateSysID() string {
 	if podIndex != "" {
 		// Validate it's a number
 		if _, err := strconv.Atoi(podIndex); err != nil {
-			a.logger.Warn("POD_INDEX is not numeric, falling back to POD_NAME", 
+			a.logger.Warn("POD_INDEX is not numeric, falling back to POD_NAME",
 				"pod_index", podIndex)
 		} else {
 			sysID := fmt.Sprintf("%s-%s", a.config.TCP.SysPrefixID, podIndex)
-			a.logger.Info("generated SysID from POD_INDEX", 
+			a.logger.Info("generated SysID from POD_INDEX",
 				"sys_id", sysID, "pod_index", podIndex)
 			return sysID
 		}
@@ -136,7 +136,7 @@ func (a *App) generateSysID() string {
 	podName := os.Getenv("POD_NAME")
 	if podName == "" {
 		// No POD_INDEX and POD_NAME, use prefix as-is (for local development)
-		a.logger.Warn("POD_INDEX and POD_NAME not set, using sys_prefix_id as SysID", 
+		a.logger.Warn("POD_INDEX and POD_NAME not set, using sys_prefix_id as SysID",
 			"sys_prefix_id", a.config.TCP.SysPrefixID)
 		return a.config.TCP.SysPrefixID
 	}
@@ -146,25 +146,25 @@ func (a *App) generateSysID() string {
 	parts := strings.Split(podName, "-")
 	if len(parts) < 2 {
 		// Not a StatefulSet pod, use prefix as-is
-		a.logger.Warn("POD_NAME does not match StatefulSet pattern, using sys_prefix_id", 
+		a.logger.Warn("POD_NAME does not match StatefulSet pattern, using sys_prefix_id",
 			"pod_name", podName, "sys_prefix_id", a.config.TCP.SysPrefixID)
 		return a.config.TCP.SysPrefixID
 	}
 
 	// Last part should be the index
 	index := parts[len(parts)-1]
-	
+
 	// Validate it's a number
 	if _, err := strconv.Atoi(index); err != nil {
 		// Not a valid index, use prefix as-is
-		a.logger.Warn("POD_NAME index is not numeric, using sys_prefix_id", 
+		a.logger.Warn("POD_NAME index is not numeric, using sys_prefix_id",
 			"pod_name", podName, "index", index, "sys_prefix_id", a.config.TCP.SysPrefixID)
 		return a.config.TCP.SysPrefixID
 	}
 
 	// Combine prefix with index
 	sysID := fmt.Sprintf("%s-%s", a.config.TCP.SysPrefixID, index)
-	a.logger.Info("generated SysID from POD_NAME", 
+	a.logger.Info("generated SysID from POD_NAME",
 		"sys_id", sysID, "pod_name", podName, "index", index)
 	return sysID
 }
@@ -201,12 +201,12 @@ func (a *App) initializeComponents() {
 
 	// Create connection manager
 	a.connMgr = connection.NewConnectionManager(a.logger.With("component", "conn-manager"), &a.config.TCP)
-	
+
 	// Generate SysID from sys_prefix_id + StatefulSet index
 	sysID := a.generateSysID()
 	a.connMgr.SetSysID(sysID)
 	a.logger.Info("SysID configured", "sys_id", sysID)
-	
+
 	a.metrics.SetKeyListProvider(a.connMgr.ListHandshakeResponses)
 
 	// 2026-03-27: Alerta 알람 클라이언트 생성 및 연결 상태 콜백 연동
@@ -327,6 +327,19 @@ func (a *App) Stop(ctx context.Context) error {
 
 	// Stop TCP components
 	a.tcpReader.Stop()
+
+	// Graceful shutdown: 프로세스 다운 알림 전송 (비동기)
+	for i, conn := range a.connMgr.GetConnections() {
+		if conn != nil {
+			if err := a.alertaClient.SendShutdownAlert(ctx, conn.ID(), conn.GetEndpointAddress(), i); err != nil {
+				a.logger.Warn("failed to send shutdown alert",
+					"conn_id", conn.ID(),
+					"endpoint", conn.GetEndpointAddress(),
+					"priority", i,
+					"error", err)
+			}
+		}
+	}
 
 	// Stop connection manager
 	a.connMgr.Stop()

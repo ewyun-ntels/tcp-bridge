@@ -2,12 +2,11 @@ package alerta
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
-	"strconv"
 	"time"
 
 	"tcp-bridge/internal/config"
@@ -59,54 +58,22 @@ func NewClient(logger *slog.Logger, cfg *config.AlertaConfig, sysID string) *Cli
 	}
 }
 
-// SendConnectionStateAlert sends an alert for TCP connection state changes.
-// READY → severity "normal" (errCode 비포함), 나머지 → severity "critical" (errCode 포함)
-// 비동기(goroutine)로 전송하여 메인 흐름을 블로킹하지 않습니다.
-func (c *Client) SendConnectionStateAlert(connID, endpoint, state string, priority int) {
-	if !c.cfg.Enabled {
-		return
-	}
-
-	alertDef, ok := c.alertMap["PGConnectionState"]
-	if !ok {
-		return
-	}
-
-	severity := "critical"
-	errCode := alertDef.ErrCode
-	if state == config.ConnStateReady {
-		severity = "normal"
-		errCode = ""
-	}
-
-	host, port, _ := net.SplitHostPort(endpoint)
-
-	attrs := map[string]string{
-		"sysId":    c.sysID,
-		"connId":   connID,
-		"peerHost": host,
-		"peerPort": port,
-		"priority": strconv.Itoa(priority),
-		"state":    state,
-	}
-	if errCode != "" {
-		attrs["errCode"] = errCode
-	}
-
-	c.sendAlert(
-		alertDef.Event,
-		fmt.Sprintf("%s/%s", c.sysID, connID),
-		severity,
-		alertDef.Group,
-		state,
-		fmt.Sprintf("peer=%s state=%s connID=%s priority=%d", endpoint, state, connID, priority),
-		attrs,
-	)
-}
-
 // sendAlert posts an alert to the Alerta API asynchronously.
 // service는 sysID, tags는 event+group에서 자동 생성
 func (c *Client) sendAlert(event, resource, severity, group, value, text string, attrs map[string]string) {
+	go func() {
+		if err := c.sendAlertSync(context.Background(), event, resource, severity, group, value, text, attrs); err != nil {
+			c.logger.Warn("failed to send alerta alert",
+				"error", err,
+				"event", event,
+				"resource", resource,
+				"severity", severity)
+		}
+	}()
+}
+
+// sendAlertSync posts an alert to the Alerta API synchronously.
+func (c *Client) sendAlertSync(ctx context.Context, event, resource, severity, group, value, text string, attrs map[string]string) error {
 	payload := alertPayload{
 		Resource:    resource,
 		Event:       event,
@@ -120,40 +87,40 @@ func (c *Client) sendAlert(event, resource, severity, group, value, text string,
 		Attributes:  attrs,
 	}
 
-	go func() {
-		body, err := json.Marshal(payload)
-		if err != nil {
-			c.logger.Error("failed to marshal alerta payload", "error", err)
-			return
-		}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alerta payload: %w", err)
+	}
 
-		url := c.cfg.URL + "/alert"
-		resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
-		if err != nil {
-			c.logger.Warn("failed to send alerta alert",
-				"error", err,
-				"event", event,
-				"resource", resource,
-				"severity", severity)
-			return
-		}
-		defer resp.Body.Close()
+	c.logger.Info("sending alerta alert",
+		"url", c.cfg.URL,
+		"event", event,
+		"resource", resource,
+		"severity", severity,
+		"value", value)
 
-		if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-			c.logger.Warn("alerta returned non-2xx status",
-				"status", resp.StatusCode,
-				"event", event,
-				"resource", resource,
-				"severity", severity)
-			return
-		}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.cfg.URL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("failed to create alerta request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
 
-		c.logger.Debug("alerta alert sent",
-			"event", event,
-			"resource", resource,
-			"severity", severity,
-			"value", value)
-	}()
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("alerta returned status %d", resp.StatusCode)
+	}
+
+	c.logger.Debug("alerta alert sent",
+		"event", event,
+		"resource", resource,
+		"severity", severity,
+		"value", value)
+	return nil
 }
 
 // SetSysID updates the sysID (called after SysID is generated)
@@ -191,8 +158,7 @@ func (c *Client) SendTestAlert() error {
 		return fmt.Errorf("failed to marshal test alert: %w", err)
 	}
 
-	url := c.cfg.URL + "/alert"
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(body))
+	resp, err := c.httpClient.Post(c.cfg.URL, "application/json", bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("failed to send test alert: %w", err)
 	}
