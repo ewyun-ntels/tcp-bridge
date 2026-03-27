@@ -1,6 +1,7 @@
 package worker
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -73,18 +74,21 @@ func (h *BridgeHandler) sendTCPResponseToConnection(connectionID string, tid uin
 }
 
 func (h *BridgeHandler) sendTCPErrorResponse(tid uint32, msgType uint8, errMsg string) {
-	errorPayload := []byte(fmt.Sprintf(`{"error":"%s"}`, errMsg))
+	errorResp := map[string]string{"error": errMsg}
+	errorPayload, _ := json.Marshal(errorResp)
 	h.sendTCPResponse(tid, msgType, errorPayload)
 }
 
 func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, tid uint32, msgType uint8, errMsg string) error {
-	errorPayload := []byte(fmt.Sprintf(`{"error":"%s"}`, errMsg))
+	errorResp := map[string]string{"error": errMsg}
+	errorPayload, _ := json.Marshal(errorResp)
 	return h.sendTCPResponseToConnection(connectionID, tid, msgType, errorPayload)
 }
 
 func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) {
 	if msg.Reply != "" {
-		errorResponse := []byte(fmt.Sprintf(`{"error":"%s"}`, errMsg))
+		errorResp := map[string]string{"error": errMsg}
+		errorResponse, _ := json.Marshal(errorResp)
 		replyPublisher := h.natsClient.GetReplyPublisher()
 		if err := replyPublisher.PublishReply(msg.Reply, errorResponse); err != nil {
 			h.logger.Error("failed to send error reply", "error", err)

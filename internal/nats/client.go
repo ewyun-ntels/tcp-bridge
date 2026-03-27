@@ -1,6 +1,7 @@
 package nats
 
 import (
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"time"
@@ -265,7 +266,8 @@ func (rp *ReplyPublisher) PublishReply(replySubject string, data []byte) error {
 
 // PublishError publishes an error response to the given subject
 func (rp *ReplyPublisher) PublishError(replySubject string, errMsg string) error {
-	errorData := []byte(fmt.Sprintf(`{"error":"%s"}`, errMsg))
+	errorResp := map[string]string{"error": errMsg}
+	errorData, _ := json.Marshal(errorResp)
 	return rp.PublishReply(replySubject, errorData)
 }
 

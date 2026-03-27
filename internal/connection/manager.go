@@ -74,6 +74,9 @@ type ConnMgr struct {
 	pingTimeout  time.Duration // PING 전송 후 PONG 대기 timeout
 	pingDone     chan struct{} // ping 고루틴 종료 신호
 
+	// Cleanup guard
+	cleanupOnce sync.Once
+
 	// Activity tracking (for idle-based ping)
 	activityMu       sync.Mutex
 	lastActivityTime time.Time // 마지막 메시지 송수신 시간
@@ -531,9 +534,10 @@ func (c *ConnMgr) attemptConnection() {
 		tcpConn.SetKeepAlivePeriod(c.config.KeepAlive)
 	}
 
-	// Store connection
+	// Store connection (reset cleanup guard for new connection lifecycle)
 	c.mu.Lock()
 	c.conn = conn
+	c.cleanupOnce = sync.Once{}
 	c.mu.Unlock()
 
 	// Perform handshake
@@ -866,21 +870,24 @@ func (c *ConnMgr) readLoop() {
 	}
 }
 
-// cleanupConnection cleans up the current connection
+// cleanupConnection cleans up the current connection.
+// Safe to call from multiple goroutines concurrently; only the first call takes effect.
 func (c *ConnMgr) cleanupConnection() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.cleanupOnce.Do(func() {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 
-	// Stop ping loop if running
-	if c.pingDone != nil {
-		close(c.pingDone)
-		c.pingDone = nil
-	}
+		// Stop ping loop if running
+		if c.pingDone != nil {
+			close(c.pingDone)
+			c.pingDone = nil
+		}
 
-	if c.conn != nil {
-		c.conn.Close()
-		c.conn = nil
-	}
+		if c.conn != nil {
+			c.conn.Close()
+			c.conn = nil
+		}
+	})
 }
 
 // GetActiveConn returns the currently active connection

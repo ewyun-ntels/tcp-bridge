@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v2"
@@ -265,7 +266,61 @@ func LoadConfig(configPath string) (*Config, error) {
 	// Set defaults
 	setDefaults(&cfg)
 
+	// Validate
+	if err := cfg.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+// Validate checks the configuration for invalid or missing values.
+// Called after setDefaults, so only checks values that must be explicitly provided
+// or values that could be set to invalid ranges.
+func (cfg *Config) Validate() error {
+	var errs []string
+
+	// TCP endpoints
+	if len(cfg.TCP.Endpoints) == 0 {
+		errs = append(errs, "at least one TCP endpoint is required")
+	}
+	for i, ep := range cfg.TCP.Endpoints {
+		if ep.Host == "" {
+			errs = append(errs, fmt.Sprintf("tcp.endpoints[%d]: host is required", i))
+		}
+		if ep.Port <= 0 || ep.Port > 65535 {
+			errs = append(errs, fmt.Sprintf("tcp.endpoints[%d]: invalid port %d (must be 1-65535)", i, ep.Port))
+		}
+	}
+
+	// NATS URLs
+	if len(cfg.NATS.URLs) == 0 {
+		errs = append(errs, "at least one NATS URL is required")
+	}
+
+	// Message handler pools
+	if cfg.MessageHandler.Outbound.WorkerCount <= 0 {
+		errs = append(errs, "message_handler.outbound.worker_count must be > 0")
+	}
+	if cfg.MessageHandler.Inbound.WorkerCount <= 0 {
+		errs = append(errs, "message_handler.inbound.worker_count must be > 0")
+	}
+	if cfg.MessageHandler.Outbound.ResponseTimeout <= 0 {
+		errs = append(errs, "message_handler.outbound.response_timeout must be > 0")
+	}
+	if cfg.MessageHandler.Inbound.ResponseTimeout <= 0 {
+		errs = append(errs, "message_handler.inbound.response_timeout must be > 0")
+	}
+
+	// Metrics port
+	if cfg.Metrics.Enabled && (cfg.Metrics.Port <= 0 || cfg.Metrics.Port > 65535) {
+		errs = append(errs, fmt.Sprintf("metrics.port: invalid port %d (must be 1-65535)", cfg.Metrics.Port))
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("%s", strings.Join(errs, "; "))
+	}
+	return nil
 }
 
 // setDefaults sets default values for configuration

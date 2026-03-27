@@ -61,13 +61,12 @@ clean: ## Clean build artifacts
 	@echo "Cleaning build artifacts..."
 	rm -rf $(BUILD_DIR)
 	rm -f coverage.out coverage.html
-	docker image prune -f
 	@echo "Cleanup completed"
 
 clean-all: clean ## Clean everything including Docker images
-	@echo "Cleaning all Docker images..."
-	-docker rmi $(DOCKER_IMAGE):$(DOCKER_TAG) $(DOCKER_IMAGE):latest
-	docker system prune -f
+	@echo "Cleaning all Docker images for $(DOCKER_IMAGE)..."
+	-docker images $(DOCKER_IMAGE) --format '{{.Repository}}:{{.Tag}}' | xargs -r docker rmi
+	-docker images --filter "dangling=true" --filter "label=app=$(APP_NAME)" -q | xargs -r docker rmi
 
 # Release targets
 release: clean build container ## Build release (clean, build, container)

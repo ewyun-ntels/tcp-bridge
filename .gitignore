@@ -1,1 +1,10 @@
 bin/
+
+# Compiled binaries
+tcp-bridge
+*.exe
+*.out
+
+# Simulator binaries (compiled, not .go source)
+simulator/simple/tcp-server
+simulator/simple/nats-client
