@@ -91,12 +91,15 @@ config:
 
   tcp:
     endpoints:
-      - host: "127.0.0.1"
-        port: 8000
-        priority: 0
-      - host: "127.0.0.1"
+      - host: "192.168.15.201"
         port: 7000
+        priority: 0
+      - host: "192.168.15.202"
+        port: 8000
         priority: 1
+      - host: "192.168.15.203"
+        port: 9000
+        priority: 2
     
     connect_timeout: "2s"
     write_timeout: "30s"
@@ -151,6 +154,16 @@ config:
   logging:
     level: "info"
     format: "json"
+
+  alerta:
+    enabled: true
+    url: "http://upm-alarm-alerta.upm-alarm.svc.cluster.local:8080/api"
+    timeout: "3s"
+    environment: "Development"
+    alerts:
+      - event: "PGConnectionState"
+        group: "Connection"
+        err_code: "1004"
 
 livenessProbe:
   httpGet:

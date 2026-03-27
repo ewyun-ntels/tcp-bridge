@@ -95,3 +95,15 @@ metrics:
 logging:
   level: "debug"  # debug, info, warn, error
   format: "json"  # json, text
+
+# 2026-03-27: Alerta 알람 연동 설정 추가
+alerta:
+  enabled: true
+  url: "http://localhost:8888/api"
+  timeout: "3s"
+  environment: "Development"
+
+  alerts:
+    - event: "PGConnectionState"
+      group: "Connection"
+      err_code: "1004"

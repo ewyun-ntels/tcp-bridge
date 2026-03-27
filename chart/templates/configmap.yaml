@@ -53,3 +53,11 @@ data:
     logging:
       level: {{ .Values.config.logging.level | quote }}
       format: {{ .Values.config.logging.format | quote }}
+
+    alerta:
+      enabled: {{ .Values.config.alerta.enabled }}
+      url: {{ .Values.config.alerta.url | quote }}
+      timeout: {{ .Values.config.alerta.timeout | quote }}
+      environment: {{ .Values.config.alerta.environment | quote }}
+      alerts:
+        {{- toYaml .Values.config.alerta.alerts | nindent 8 }}

@@ -27,6 +27,7 @@ type Config struct {
 	Queue          QueueConfig          `yaml:"queue"`
 	Metrics        MetricsConfig        `yaml:"metrics"`
 	Logging        LoggingConfig        `yaml:"logging"`
+	Alerta         AlertaConfig         `yaml:"alerta"`
 }
 
 // ServerConfig contains general server configuration
@@ -246,6 +247,23 @@ type LoggingConfig struct {
 	Format string `yaml:"format"`
 }
 
+// AlertaConfig contains Alerta alarm system configuration
+// 2026-03-27: 추가 — service는 sysID, tags는 event/group에서 자동 생성
+type AlertaConfig struct {
+	Enabled     bool          `yaml:"enabled"`
+	URL         string        `yaml:"url"`
+	Timeout     time.Duration `yaml:"timeout"`
+	Environment string        `yaml:"environment"`
+	Alerts      []AlertDef    `yaml:"alerts"`
+}
+
+// AlertDef defines an individual alert type
+type AlertDef struct {
+	Event   string `yaml:"event"`
+	Group   string `yaml:"group"`
+	ErrCode string `yaml:"err_code"`
+}
+
 // Address returns the formatted address for TCP endpoint
 func (e TCPEndpoint) Address() string {
 	return fmt.Sprintf("%s:%d", e.Host, e.Port)
@@ -442,5 +460,13 @@ func setDefaults(cfg *Config) {
 
 	if cfg.Logging.Format == "" {
 		cfg.Logging.Format = "json"
+	}
+
+	// Alerta defaults
+	if cfg.Alerta.Timeout == 0 {
+		cfg.Alerta.Timeout = 3 * time.Second
+	}
+	if cfg.Alerta.Environment == "" {
+		cfg.Alerta.Environment = "Development"
 	}
 }

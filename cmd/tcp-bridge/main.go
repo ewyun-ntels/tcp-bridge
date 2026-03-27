@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"tcp-bridge/internal/alerta"
 	"tcp-bridge/internal/config"
 	"tcp-bridge/internal/connection"
 	"tcp-bridge/internal/inflight"
@@ -54,6 +55,9 @@ type App struct {
 
 	// Metrics
 	metrics *metrics.Metrics // Prometheus 메트릭
+
+	// Alerta
+	alertaClient *alerta.Client // Alerta 알람 클라이언트
 }
 
 func main() {
@@ -205,9 +209,21 @@ func (a *App) initializeComponents() {
 	
 	a.metrics.SetKeyListProvider(a.connMgr.ListHandshakeResponses)
 
+	// 2026-03-27: Alerta 알람 클라이언트 생성 및 연결 상태 콜백 연동
+	a.alertaClient = alerta.NewClient(a.logger.With("component", "alerta"), &a.config.Alerta, sysID)
+
+	// connID → priority 매핑 (알람 전송 시 priority 정보 포함용)
+	connPriority := make(map[string]int, len(a.config.TCP.Endpoints))
+	for _, ep := range a.config.TCP.Endpoints {
+		connPriority[fmt.Sprintf("conn_%d", ep.Priority)] = ep.Priority
+	}
+
 	// Set connection state change callback for metrics
 	a.connMgr.SetStateChangeCallback(func(connID string, endpoint string, state string) {
 		a.metrics.SetConnectionState(connID, endpoint, state)
+		// Alerta 알람 전송
+		priority := connPriority[connID]
+		a.alertaClient.SendConnectionStateAlert(connID, endpoint, state, priority)
 	})
 	a.connMgr.SetHandshakeAckCallback(func(connID string, endpoint string, sysID string) {
 		a.metrics.SetConnectionInfo(connID, endpoint, sysID)
