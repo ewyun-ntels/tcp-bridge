@@ -13,9 +13,6 @@ tcp:
     - host: "127.0.0.1" 
       port: 7000
       priority: 1  # Secondary
-    - host: "127.0.0.1"
-      port: 7070
-      priority: 2  # Tertiary
   
   connect_timeout: "2s"       # TCP 연결 시도 timeout (2초 내 연결 실패 시 connect failed)
   write_timeout: "30s"        # 데이터 전송(Write) 작업 timeout

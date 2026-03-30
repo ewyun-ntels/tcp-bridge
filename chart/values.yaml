@@ -72,18 +72,19 @@ resources:
     cpu: 100m
     memory: 128Mi
 
+nodeSelector:
+  node-role.kubernetes.io/worker: ""
+
 affinity:
   podAntiAffinity:
-    preferredDuringSchedulingIgnoredDuringExecution:
-    - weight: 100
-      podAffinityTerm:
-        labelSelector:
-          matchExpressions:
-          - key: app.kubernetes.io/name
-            operator: In
-            values:
-            - tcp-bridge
-        topologyKey: kubernetes.io/hostname
+    requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+        - key: app.kubernetes.io/name
+          operator: In
+          values:
+          - tcp-bridge
+      topologyKey: kubernetes.io/hostname
 
 config:
   server:
