@@ -159,7 +159,7 @@ config:
     enabled: true
     url: "http://upm-alarm-alerta.upm-alarm.svc.cluster.local:8080/api/alert"
     timeout: "3s"
-    environment: "Development"
+    environment: "RealTimeAlert"
     alerts:
       - event: "PGConnectionState"
         group: "Connection"

@@ -8,3 +8,6 @@ tcp-bridge
 # Simulator binaries (compiled, not .go source)
 simulator/simple/tcp-server
 simulator/simple/nats-client
+
+.codex
+*.xml

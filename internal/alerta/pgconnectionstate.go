@@ -38,7 +38,7 @@ func (c *Client) SendConnectionStateAlert(connID, endpoint, state string, priori
 
 	c.sendAlert(
 		alertDef.Event,
-		fmt.Sprintf("%s/%s", c.sysID, connID),
+		fmt.Sprintf("%s:%s", c.sysID, connID),
 		severity,
 		alertDef.Group,
 		state,
@@ -70,7 +70,7 @@ func (c *Client) SendShutdownAlert(ctx context.Context, connID, endpoint string,
 	return c.sendAlertSync(
 		ctx,
 		alertDef.Event,
-		fmt.Sprintf("%s/%s", c.sysID, connID),
+		fmt.Sprintf("%s:%s", c.sysID, connID),
 		"critical",
 		alertDef.Group,
 		config.ConnStateDisconnected,

@@ -101,7 +101,7 @@ alerta:
   enabled: true
   url: "http://localhost:8888/api/alert"
   timeout: "3s"
-  environment: "Development"
+  environment: "RealTimeAlert"
 
   alerts:
     - event: "PGConnectionState"
