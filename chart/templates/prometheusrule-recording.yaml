@@ -1,0 +1,69 @@
+{{- if .Values.prometheusRule.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: tcp-bridge-recording-rules
+  {{- if .Values.serviceMonitor.namespace }}
+  namespace: {{ .Values.serviceMonitor.namespace }}
+  {{- else }}
+  namespace: {{ .Release.Namespace }}
+  {{- end }}
+  labels:
+    {{- include "tcp-bridge.labels" . | nindent 4 }}
+    {{- with .Values.serviceMonitor.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: tcp-bridge.recording.connectivity
+      interval: 30s
+      rules:
+        - record: tcp_bridge:ready_connection_state:max
+          expr: |
+            label_replace(
+              max by (job, namespace, pod, connection_id) (tcp_bridge_connection_state),
+              "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
+            )
+
+    - name: tcp-bridge.recording.inbound
+      interval: 30s
+      rules:
+        - record: tcp_bridge:inbound_responses_total:increase2m
+          expr: |
+            label_replace(
+              sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_responses_total[2m])),
+              "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
+            )
+
+        - record: tcp_bridge:inbound_error_ratio:2m
+          expr: |
+            label_replace(
+              (
+                sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_responses_total{status=~"error|timeout|dropped"}[2m]))
+                /
+                clamp_min(sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_responses_total[2m])), 1)
+              ),
+              "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
+            )
+
+    - name: tcp-bridge.recording.outbound
+      interval: 30s
+      rules:
+        - record: tcp_bridge:outbound_responses_total:increase2m
+          expr: |
+            label_replace(
+              sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_responses_total[2m])),
+              "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
+            )
+
+        - record: tcp_bridge:outbound_error_ratio:2m
+          expr: |
+            label_replace(
+              (
+                sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_responses_total{status=~"error|timeout|dropped"}[2m]))
+                /
+                clamp_min(sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_responses_total[2m])), 1)
+              ),
+              "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
+            )
+{{- end }}

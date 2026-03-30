@@ -61,6 +61,9 @@ serviceMonitor:
   scrapeTimeout: 5s
   namespace: ""
 
+prometheusRule:
+  enabled: true
+
 resources:
   limits:
     cpu: 500m
@@ -97,9 +100,6 @@ config:
       - host: "192.168.15.201"
         port: 8000
         priority: 1
-      - host: "192.168.15.201"
-        port: 9000
-        priority: 2
     
     connect_timeout: "2s"
     write_timeout: "30s"

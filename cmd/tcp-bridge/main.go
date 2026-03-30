@@ -237,6 +237,7 @@ func (a *App) initializeComponents() {
 		a.metrics.IncFailover(from, to, reason)
 		a.metrics.SetActiveConnection(connectionIDs(a.connMgr.GetConnections()), normalizeActiveConnectionID(to))
 	})
+	a.initializeConnectionMetrics()
 	a.metrics.SetActiveConnection(connectionIDs(a.connMgr.GetConnections()), "")
 
 	// Create NATS client
@@ -403,6 +404,16 @@ func (a *App) collectMetrics() {
 			}
 			a.metrics.SetLastActivityTimestamp(conn.ID(), conn.GetLastActivityTime())
 		}
+	}
+}
+
+func (a *App) initializeConnectionMetrics() {
+	for _, conn := range a.connMgr.GetConnections() {
+		if conn == nil {
+			continue
+		}
+		a.metrics.SetConnectionState(conn.ID(), conn.GetEndpointAddress(), conn.GetState())
+		a.metrics.SetLastActivityTimestamp(conn.ID(), time.Time{})
 	}
 }
 
