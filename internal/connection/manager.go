@@ -656,7 +656,7 @@ func (c *ConnMgr) performHandshake() error {
 	// Parse only the fields needed for runtime behavior; successful payloads are stored as raw JSON.
 	var ackResp struct {
 		SysID        string `json:"sys-id"`
-		Code         int    `json:"code"`
+		Code         string `json:"code"`
 		PingInterval *int   `json:"ping-interval"`
 		Cause        string `json:"cause"`
 	}
@@ -670,7 +670,7 @@ func (c *ConnMgr) performHandshake() error {
 	}
 
 	// Check response code
-	if ackResp.Code != 200 {
+	if ackResp.Code != "200" {
 		c.logger.Warn("HELLO response rejected",
 			"tid", binary.BigEndian.Uint32(header[4:8]),
 			"peer-sys-id", ackResp.SysID,
@@ -678,9 +678,9 @@ func (c *ConnMgr) performHandshake() error {
 			"cause", ackResp.Cause,
 			"payload", string(payload))
 		if ackResp.Cause != "" {
-			return fmt.Errorf("handshake failed with code %d: %s", ackResp.Code, ackResp.Cause)
+			return fmt.Errorf("handshake failed with code %s: %s", ackResp.Code, ackResp.Cause)
 		}
-		return fmt.Errorf("handshake failed with code %d", ackResp.Code)
+		return fmt.Errorf("handshake failed with code %s", ackResp.Code)
 	}
 
 	if c.onHandshakeResponse != nil {
