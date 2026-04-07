@@ -729,6 +729,7 @@ func (c *ConnMgr) readLoop() {
 	defer func() {
 		c.cleanupConnection()
 		disconnectReason = c.takeDisconnectReason(disconnectReason)
+		c.logger.Info("read loop exited", "disconnect_reason", disconnectReason)
 		if disconnectReason != "" && c.onDisconnect != nil {
 			c.onDisconnect(disconnectReason)
 		}
@@ -757,8 +758,10 @@ func (c *ConnMgr) readLoop() {
 				return
 			}
 			disconnectReason = classifyReadError(err)
-			if err != io.EOF {
-				c.logger.Error("failed to read frame header", "error", err)
+			if err == io.EOF {
+				c.logger.Warn("connection closed by remote (EOF)", "reason", disconnectReason)
+			} else {
+				c.logger.Error("failed to read frame header", "error", err, "reason", disconnectReason)
 			}
 			return
 		}
@@ -811,8 +814,8 @@ func (c *ConnMgr) readLoop() {
 		if payloadLen > 0 {
 			payload = make([]byte, payloadLen)
 			if _, err := io.ReadFull(conn, payload); err != nil {
-				disconnectReason = "read_error"
-				c.logger.Error("failed to read frame payload", "error", err)
+				disconnectReason = classifyReadError(err)
+				c.logger.Error("failed to read frame payload", "error", err, "reason", disconnectReason)
 				return
 			}
 		}
@@ -1030,11 +1033,11 @@ func (c *ConnMgr) sendPing() error {
 		return fmt.Errorf("no connection available")
 	}
 
-	// PING frame has no payload (JSON-less)
+	// PING frame uses CRLF payload so Body Length matches transmitted bytes.
 	pingFrame := &config.Frame{
 		Type:    config.FrameTypePing,
 		TID:     tid.Next(),
-		Payload: nil,
+		Payload: []byte{'\r', '\n'},
 	}
 
 	pingData, err := pingFrame.Serialize()
