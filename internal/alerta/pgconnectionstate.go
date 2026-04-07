@@ -22,6 +22,14 @@ func (c *Client) SendConnectionStateAlert(connID, endpoint, state string, priori
 		return
 	}
 
+	c.mu.Lock()
+	if c.lastAlertedState[connID] == state {
+		c.mu.Unlock()
+		return
+	}
+	c.lastAlertedState[connID] = state
+	c.mu.Unlock()
+
 	alertDef, ok := c.alertMap[pgConnectionStateEvent]
 	if !ok {
 		return

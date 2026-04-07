@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"tcp-bridge/internal/config"
@@ -33,11 +34,13 @@ type alertPayload struct {
 
 // Client sends alerts to the Alerta API
 type Client struct {
-	logger     *slog.Logger
-	cfg        *config.AlertaConfig
-	sysID      string
-	httpClient *http.Client
-	alertMap   map[string]config.AlertDef // event name → AlertDef
+	logger           *slog.Logger
+	cfg              *config.AlertaConfig
+	sysID            string
+	httpClient       *http.Client
+	alertMap         map[string]config.AlertDef // event name → AlertDef
+	mu               sync.Mutex
+	lastAlertedState map[string]string // connID → last sent alert state
 }
 
 // NewClient creates a new Alerta client
@@ -54,7 +57,8 @@ func NewClient(logger *slog.Logger, cfg *config.AlertaConfig, sysID string) *Cli
 		httpClient: &http.Client{
 			Timeout: cfg.Timeout,
 		},
-		alertMap: alertMap,
+		alertMap:         alertMap,
+		lastAlertedState: make(map[string]string),
 	}
 }
 
