@@ -557,8 +557,12 @@ func (c *ConnMgr) attemptConnection() {
 		c.onConnectSuccess()
 	}
 
-	// Initialize activity time
+	// Initialize activity time and reset ping state for new connection lifecycle
 	c.updateLastActivity()
+	c.activityMu.Lock()
+	c.awaitingPong = false
+	c.lastPingSentAt = time.Time{}
+	c.activityMu.Unlock()
 
 	// Start ping loop if ping interval was set
 	c.mu.RLock()
