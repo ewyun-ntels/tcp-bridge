@@ -25,7 +25,7 @@ tcp:
   ping_interval_margin: "0s"   # HELLO ACK의 ping-interval에서 차감할 안전 마진 (예: "5s")
   
   # Handshake credentials
-  sys_prefix_id: "tcp-bridge"  # Peer Name Prefix (StatefulSet에서 index가 추가됨)
+  sys_prefix_id: "tcp-bridge-"  # Peer Name Prefix (StatefulSet에서 index가 추가됨)
   branch_name: "SS"            # 국사명 (SS: 성수, DS: 둔산, BR: 보라매)
 
 nats:

@@ -132,17 +132,10 @@ func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 		if responseType == 0 {
 			responseType = frame.Type
 		}
-		writeStartedAt := time.Now()
-		err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full")
-		h.metrics.ObserveInboundResponseWriteDuration(frame.ConnectionID, msgType, "dropped", time.Since(writeStartedAt))
+		if err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full"); err != nil {
+			logger.Error("failed to send TCP error response for dropped frame", "error", err)
+		}
 		h.metrics.IncInboundResponses(frame.ConnectionID, msgType, "dropped")
-		h.metrics.AddInboundInflight(frame.ConnectionID, msgType, -1)
-		if !frame.ReceivedAt.IsZero() {
-			h.metrics.ObserveInboundEndToEndDuration(frame.ConnectionID, msgType, "dropped", time.Since(frame.ReceivedAt))
-		}
-		if err != nil {
-			h.metrics.IncInboundErrors(frame.ConnectionID, msgType, classifyInboundWriteError(err))
-		}
 	}
 }
 
@@ -177,10 +170,5 @@ func (h *BridgeHandler) handleInboundInflightExpiry(entry *inflight.InflightEntr
 	if entry.TCPReplyInfo != nil {
 		connectionID = entry.TCPReplyInfo.ConnectionID
 	}
-	h.metrics.IncInboundErrors(connectionID, msgType, "inflight_expired")
-	h.metrics.IncInboundTimeout(connectionID, msgType, "overall")
-	h.metrics.IncInboundUnmatchedResponse(connectionID, msgType)
 	h.metrics.IncInboundResponses(connectionID, msgType, "timeout")
-	h.metrics.IncInboundWorkerTasks(connectionID, "timeout")
-	h.metrics.AddInboundInflight(connectionID, msgType, -1)
 }

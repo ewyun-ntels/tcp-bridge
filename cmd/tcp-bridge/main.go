@@ -125,7 +125,7 @@ func (a *App) generateSysID() string {
 			a.logger.Warn("POD_INDEX is not numeric, falling back to POD_NAME",
 				"pod_index", podIndex)
 		} else {
-			sysID := fmt.Sprintf("%s-%s", a.config.TCP.SysPrefixID, podIndex)
+			sysID := fmt.Sprintf("%s%s", a.config.TCP.SysPrefixID, podIndex)
 			a.logger.Info("generated SysID from POD_INDEX",
 				"sys_id", sysID, "pod_index", podIndex)
 			return sysID
@@ -225,16 +225,7 @@ func (a *App) initializeComponents() {
 		priority := connPriority[connID]
 		a.alertaClient.SendConnectionStateAlert(connID, endpoint, state, priority)
 	})
-	a.connMgr.SetHandshakeAckCallback(func(connID string, endpoint string, sysID string) {
-		a.metrics.SetConnectionInfo(connID, endpoint, sysID)
-	})
-	a.connMgr.SetConnectAttemptCallback(a.metrics.IncConnectionAttempts)
-	a.connMgr.SetConnectSuccessCallback(a.metrics.IncConnectionSuccess)
-	a.connMgr.SetConnectFailureCallback(a.metrics.IncConnectionFailure)
-	a.connMgr.SetDisconnectCallback(a.metrics.IncDisconnect)
-	a.connMgr.SetPingRTTCallback(a.metrics.ObservePingRTT)
 	a.connMgr.SetActiveConnectionChangeCallback(func(from string, to string, reason string) {
-		a.metrics.IncFailover(from, to, reason)
 		a.metrics.SetActiveConnection(connectionIDs(a.connMgr.GetConnections()), normalizeActiveConnectionID(to))
 	})
 	a.initializeConnectionMetrics()
@@ -313,9 +304,6 @@ func (a *App) Start(ctx context.Context) error {
 		return fmt.Errorf("failed to start bridge handler: %w", err)
 	}
 
-	// Start metrics collection goroutine
-	go a.collectMetrics()
-
 	return nil
 }
 
@@ -364,11 +352,8 @@ func (a *App) handleTCPRequest(frame *config.Frame) {
 	a.logger.Debug("handling TCP request", "tid", frame.TID)
 	frame.ReceivedAt = time.Now()
 
-	// Update metrics
-	a.metrics.IncTCPFramesReceivedForConnection(frame.ConnectionID, "request")
 	msgType := fmt.Sprintf("0x%02x", frame.Type)
 	a.metrics.IncInboundRequests(frame.ConnectionID, msgType)
-	a.metrics.AddInboundInflight(frame.ConnectionID, msgType, 1)
 
 	// Dispatch to bridge handler via frame dispatcher
 	a.frameDispatcher.DispatchRequestFrame(frame)
@@ -378,32 +363,13 @@ func (a *App) handleTCPRequest(frame *config.Frame) {
 func (a *App) handleTCPResponse(frame *config.Frame) {
 	a.logger.Debug("handling TCP response", "tid", frame.TID)
 
-	// Update metrics
-	a.metrics.IncTCPFramesReceivedForConnection(frame.ConnectionID, "response")
-
 	// Match with inflight-A entries (NATS→TCP responses)
 	if handled := a.inflightMgr.GetInflightA().HandleResponse(frame); !handled {
-		a.metrics.IncOutboundUnmatchedResponse(frame.ConnectionID, fmt.Sprintf("0x%02x", frame.Type))
 		a.logger.Warn("dropping unmatched TCP response",
 			"tid", frame.TID,
 			"connection_id", frame.ConnectionID,
 			"response_type", fmt.Sprintf("0x%02x", frame.Type),
 			"payload_size", len(frame.Payload))
-	}
-}
-
-// collectMetrics periodically collects and updates metrics
-func (a *App) collectMetrics() {
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		for _, conn := range a.connMgr.GetConnections() {
-			if conn == nil {
-				continue
-			}
-			a.metrics.SetLastActivityTimestamp(conn.ID(), conn.GetLastActivityTime())
-		}
 	}
 }
 
@@ -413,7 +379,6 @@ func (a *App) initializeConnectionMetrics() {
 			continue
 		}
 		a.metrics.SetConnectionState(conn.ID(), conn.GetEndpointAddress(), conn.GetState())
-		a.metrics.SetLastActivityTimestamp(conn.ID(), time.Time{})
 	}
 }
 
