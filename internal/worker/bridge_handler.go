@@ -115,7 +115,15 @@ func (h *BridgeHandler) Stop() {
 
 // HandleOutboundRequest enqueues outbound work into the dedicated pool.
 func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
+	metricsConnectionID := ""
+	msgTypeLabel := "unknown"
+	if msgType, _, ok := h.resolveOutboundRoute(msg.Subject); ok {
+		msgTypeLabel = formatMsgType(msgType)
+	}
+
 	if !h.outboundPool.Enqueue(msg) {
+		h.metrics.IncOutboundRequests(metricsConnectionID, msg.Subject, msgTypeLabel)
+		h.metrics.IncOutboundResponses(metricsConnectionID, msg.Subject, msgTypeLabel, "dropped")
 		h.replyError(msg, "outbound worker queue is full")
 	}
 }
@@ -123,8 +131,10 @@ func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
 // HandleInboundFrame enqueues inbound work into the dedicated pool.
 func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 	frame.EnqueuedAt = time.Now()
+	msgType := formatMsgType(frame.Type)
+	h.metrics.IncInboundRequests(frame.ConnectionID, msgType)
+
 	if !h.inboundPool.Enqueue(frame) {
-		msgType := formatMsgType(frame.Type)
 		logger := h.logger.With("tid", frame.TID, "connection_id", frame.ConnectionID, "msg_type", msgType)
 		logger.Error("inbound worker queue is full")
 
