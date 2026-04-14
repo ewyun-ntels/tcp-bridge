@@ -112,7 +112,7 @@ Flow:
 #### `tcp_bridge_inbound_responses_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `msg_type`, `status`
+- Labels: `connection_id`, `msg_type`, `status`, `reason`
 - 의미: inbound 요청의 최종 처리 결과 총량
 
 `status` 의미:
@@ -121,6 +121,16 @@ Flow:
 - `error`: NATS request 실패 또는 TCP 응답 전송 실패
 - `timeout`: inflight timeout 또는 NATS timeout
 - `dropped`: inbound worker queue 포화 또는 미정의 msg_type
+
+`reason` 의미:
+
+- `ok`: 정상 처리
+- `queue_full`: inbound worker queue 포화
+- `unknown_message_type`: inbound subject 매핑 실패
+- `nats_request_timeout`: NATS request timeout
+- `nats_request_failed`: timeout 제외 NATS request 실패
+- `tcp_response_write_failed`: NATS 응답 후 TCP write 실패
+- `inflight_expired`: inflight expiry 핸들러에서 timeout 처리
 
 증가 조건:
 
@@ -170,7 +180,7 @@ Flow:
 #### `tcp_bridge_outbound_responses_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `subject`, `msg_type`, `status`
+- Labels: `connection_id`, `subject`, `msg_type`, `status`, `reason`
 - 의미: outbound 요청의 최종 처리 결과 총량
 
 `status` 의미:
@@ -180,10 +190,16 @@ Flow:
 - `timeout`: 모든 retry/priority 경로에서 응답 timeout
 - `dropped`: 알 수 없는 NATS subject 또는 queue 포화
 
-주의:
+`reason` 의미:
 
-- `no ready connection` 같은 상태도 별도 status로 분리되지 않고 현재는 `error`로 집계된다
-- 코드에 `classifyOutboundWriteError()`가 있지만 현재 metric status 분기에는 연결되지 않는다
+- `ok`: 정상 처리
+- `queue_full`: outbound worker queue 포화
+- `unknown_subject`: outbound subject 해석 실패
+- `frame_serialize_failed`: TCP frame 직렬화 실패
+- `no_ready_connection`: 사용 가능한 READY connection 부재
+- `tcp_request_write_failed`: 모든 시도에서 TCP write 실패 누적
+- `tcp_response_timeout`: 모든 retry/priority 경로에서 응답 timeout
+- `reply_publish_failed`: TCP 응답 후 NATS reply 발행 실패
 
 #### `tcp_bridge_outbound_end_to_end_duration_seconds`
 
@@ -440,8 +456,11 @@ clamp_min(sum(rate(tcp_bridge_inbound_responses_total[2m])), 1)
 우선 원인 분기:
 
 - `timeout` 위주면 NATS/downstream 지연
+- `reason="nats_request_timeout"` 또는 `reason="inflight_expired"`로 세부 분리 가능
 - `dropped` 위주면 queue 설정 또는 routing 누락
+- `reason="queue_full"`인지 `reason="unknown_message_type"`인지 확인
 - `error` 위주면 NATS 요청 실패나 TCP 응답 write 실패
+- `reason="nats_request_failed"`와 `reason="tcp_response_write_failed"`로 분리 가능
 
 ### outbound 알림이 떴을 때
 
@@ -455,8 +474,11 @@ clamp_min(sum(rate(tcp_bridge_inbound_responses_total[2m])), 1)
 우선 원인 분기:
 
 - `timeout` 위주면 TCP peer 응답 지연 또는 failover 반복
+- `reason="tcp_response_timeout"`인지 확인
 - `error` 위주면 connection ready 부재, write 실패, reply publish 실패
+- `reason="no_ready_connection"`, `reason="tcp_request_write_failed"`, `reason="reply_publish_failed"`, `reason="frame_serialize_failed"`로 세부 분리 가능
 - `dropped` 위주면 subject routing 또는 queue 포화
+- `reason="unknown_subject"`인지 `reason="queue_full"`인지 확인
 
 ## 8. 현재 구현 기준 갭과 판단
 

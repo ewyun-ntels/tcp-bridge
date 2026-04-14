@@ -90,7 +90,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_inbound_responses_total",
 			Help: "Total number of completed inbound request outcomes",
 		},
-		[]string{"connection_id", "msg_type", "status"},
+		[]string{"connection_id", "msg_type", "status", "reason"},
 	)
 
 	m.inboundEndToEndDuration = prometheus.NewHistogramVec(
@@ -115,7 +115,7 @@ func (m *Metrics) initMetrics() {
 			Name: "tcp_bridge_outbound_responses_total",
 			Help: "Total number of completed outbound request outcomes",
 		},
-		[]string{"connection_id", "subject", "msg_type", "status"},
+		[]string{"connection_id", "subject", "msg_type", "status", "reason"},
 	)
 
 	m.outboundEndToEndDuration = prometheus.NewHistogramVec(
@@ -232,8 +232,8 @@ func (m *Metrics) IncInboundRequests(connectionID string, msgType string) {
 	m.inboundRequestsTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType).Inc()
 }
 
-func (m *Metrics) IncInboundResponses(connectionID string, msgType string, status string) {
-	m.inboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, status).Inc()
+func (m *Metrics) IncInboundResponses(connectionID string, msgType string, status string, reason string) {
+	m.inboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, status, reason).Inc()
 }
 
 func (m *Metrics) ObserveInboundEndToEndDuration(connectionID string, msgType string, status string, duration time.Duration) {
@@ -244,8 +244,8 @@ func (m *Metrics) IncOutboundRequests(connectionID string, subject string, msgTy
 	m.outboundRequestsTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType).Inc()
 }
 
-func (m *Metrics) IncOutboundResponses(connectionID string, subject string, msgType string, status string) {
-	m.outboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status).Inc()
+func (m *Metrics) IncOutboundResponses(connectionID string, subject string, msgType string, status string, reason string) {
+	m.outboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status, reason).Inc()
 }
 
 func (m *Metrics) ObserveOutboundEndToEndDuration(connectionID string, subject string, msgType string, status string, duration time.Duration) {

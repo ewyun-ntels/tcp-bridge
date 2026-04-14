@@ -66,7 +66,7 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 	logger := p.logger.With("tid", frame.TID, "msg_type", msgType)
 	logger.Debug("processing TCP request")
 	startedAt := time.Now()
-	finalStatus := "error"
+	finalStatus := inboundStatusError
 	defer func() {
 		if !frame.ReceivedAt.IsZero() {
 			p.handler.metrics.ObserveInboundEndToEndDuration(frame.ConnectionID, msgType, finalStatus, time.Since(frame.ReceivedAt))
@@ -82,8 +82,8 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		logger.Error("unknown message type, dropping",
 			"msg_type", msgType,
 			"connection_id", frame.ConnectionID)
-		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, "dropped")
-		finalStatus = "dropped"
+		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusDropped, inboundReasonUnknownMessageType)
+		finalStatus = inboundStatusDropped
 		return
 	}
 	logger.Debug("routing to NATS", "subject", subject)
@@ -113,28 +113,30 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 	if err != nil {
 		logger.Error("NATS request failed", "subject", subject, "error", err)
 		p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
+		reason := inboundReasonNATSRequestFailed
 		if errors.Is(err, nats.ErrTimeout) {
-			finalStatus = "timeout"
+			finalStatus = inboundStatusTimeout
+			reason = inboundReasonNATSRequestTimeout
 		} else {
-			finalStatus = "error"
+			finalStatus = inboundStatusError
 		}
 		writeErr := p.handler.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "internal error")
 		if writeErr != nil {
 			logger.Error("failed to send TCP error response", "error", writeErr)
 		}
-		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, finalStatus)
+		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, finalStatus, reason)
 		return
 	}
 
 	logger.Debug("received NATS response", "subject", subject, "response_size", len(response))
 	if err := p.handler.sendTCPResponseToConnection(frame.ConnectionID, frame.TID, responseType, response); err != nil {
 		logger.Error("failed to send TCP response", "error", err, "elapsed_ms", time.Since(startedAt).Milliseconds())
-		finalStatus = "error"
-		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, "error")
+		finalStatus = inboundStatusError
+		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusError, inboundReasonTCPResponseWriteFailed)
 		p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 		return
 	}
-	p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, "success")
-	finalStatus = "success"
+	p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusSuccess, inboundReasonOK)
+	finalStatus = inboundStatusSuccess
 	p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 }

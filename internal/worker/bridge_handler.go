@@ -123,7 +123,7 @@ func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
 
 	if !h.outboundPool.Enqueue(msg) {
 		h.metrics.IncOutboundRequests(metricsConnectionID, msg.Subject, msgTypeLabel)
-		h.metrics.IncOutboundResponses(metricsConnectionID, msg.Subject, msgTypeLabel, "dropped")
+		h.metrics.IncOutboundResponses(metricsConnectionID, msg.Subject, msgTypeLabel, outboundStatusDropped, outboundReasonQueueFull)
 		h.replyError(msg, "outbound worker queue is full")
 	}
 }
@@ -145,7 +145,7 @@ func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 		if err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full"); err != nil {
 			logger.Error("failed to send TCP error response for dropped frame", "error", err)
 		}
-		h.metrics.IncInboundResponses(frame.ConnectionID, msgType, "dropped")
+		h.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusDropped, inboundReasonQueueFull)
 	}
 }
 
@@ -180,5 +180,5 @@ func (h *BridgeHandler) handleInboundInflightExpiry(entry *inflight.InflightEntr
 	if entry.TCPReplyInfo != nil {
 		connectionID = entry.TCPReplyInfo.ConnectionID
 	}
-	h.metrics.IncInboundResponses(connectionID, msgType, "timeout")
+	h.metrics.IncInboundResponses(connectionID, msgType, inboundStatusTimeout, inboundReasonInflightExpired)
 }
