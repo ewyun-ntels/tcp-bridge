@@ -111,6 +111,16 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 		TID:     tid,
 		Payload: msg.Data,
 	}
+	logger.Info("outbound TCP request prepared",
+		"direction", "outbound",
+		"stage", "tcp_request_prepare",
+		"tid", tid,
+		"subject", msg.Subject,
+		"reply", msg.Reply,
+		"msg_type", msgTypeLabel,
+		"expected_response_type", formatMsgType(expectedRespType),
+		"frame", frame.String(),
+		"payload_size", len(frame.Payload))
 
 	retryAttempts := p.config.RetryAttempts
 	responseTimeout := p.config.ResponseTimeout
@@ -182,12 +192,15 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 
 		for attempt := 1; attempt <= retryAttempts; attempt++ {
 			lastConnectionID = conn.ID()
-			logger.Info("attempting TCP send",
+			logger.Info("outbound TCP request sending",
+				"direction", "outbound",
+				"stage", "tcp_request_send",
 				"tid", frame.TID,
 				"msg_type", msgTypeLabel,
 				"connection_id", conn.ID(),
 				"priority", priority,
 				"attempt", attempt,
+				"frame", frame.String(),
 				"payload_size", len(frame.Payload),
 				"elapsed_ms", time.Since(startedAt).Milliseconds())
 
@@ -216,11 +229,14 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 				continue
 			}
 
-			logger.Info("TCP frame sent successfully",
+			logger.Info("outbound TCP request sent",
+				"direction", "outbound",
+				"stage", "tcp_request_sent",
 				"tid", frame.TID,
 				"connection_id", conn.ID(),
 				"priority", priority,
 				"attempt", attempt,
+				"frame", frame.String(),
 				"bytes", bytesWritten)
 
 			if inflightEntry != nil {
@@ -230,21 +246,41 @@ func (p *OutboundWorkerPool) sendAndWaitWithRetry(
 
 			select {
 			case responseFrame := <-inflightEntry.ResponseChan:
-				logger.Info("received TCP response",
+				logger.Info("outbound TCP response matched",
+					"direction", "outbound",
+					"stage", "tcp_response_matched",
 					"tid", frame.TID,
 					"connection_id", responseFrame.ConnectionID,
 					"priority", priority,
 					"attempt", attempt,
 					"response_type", formatMsgType(responseFrame.Type),
+					"frame", responseFrame.String(),
 					"response_size", len(responseFrame.Payload))
 
 				replyPublisher := p.handler.natsClient.GetReplyPublisher()
+				logger.Info("outbound NATS reply sending",
+					"direction", "outbound",
+					"stage", "nats_reply_send",
+					"tid", frame.TID,
+					"subject", inflightEntry.Subject,
+					"reply_subject", inflightEntry.ReplySubject,
+					"connection_id", responseFrame.ConnectionID,
+					"response_type", formatMsgType(responseFrame.Type),
+					"payload_size", len(responseFrame.Payload))
 				if err := replyPublisher.PublishReply(inflightEntry.ReplySubject, responseFrame.Payload); err != nil {
 					logger.Error("failed to send NATS reply", "tid", frame.TID, "error", err)
 					return false, outboundStatusError, outboundReasonReplyPublishFailed, responseFrame.ConnectionID
 				}
 
-				logger.Debug("sent NATS reply (payload only)", "tid", frame.TID, "size", len(responseFrame.Payload))
+				logger.Info("outbound NATS reply sent",
+					"direction", "outbound",
+					"stage", "nats_reply_sent",
+					"tid", frame.TID,
+					"subject", inflightEntry.Subject,
+					"reply_subject", inflightEntry.ReplySubject,
+					"connection_id", responseFrame.ConnectionID,
+					"response_type", formatMsgType(responseFrame.Type),
+					"payload_size", len(responseFrame.Payload))
 				return true, outboundStatusSuccess, outboundReasonOK, responseFrame.ConnectionID
 
 			case <-time.After(responseTimeout):

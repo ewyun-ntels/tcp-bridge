@@ -86,7 +86,13 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		finalStatus = inboundStatusDropped
 		return
 	}
-	logger.Debug("routing to NATS", "subject", subject)
+	logger.Info("inbound NATS request sending",
+		"direction", "inbound",
+		"stage", "nats_request_send",
+		"subject", subject,
+		"connection_id", frame.ConnectionID,
+		"frame", frame.String(),
+		"payload_size", len(frame.Payload))
 
 	deadline := time.Now().Add(p.config.Timeout).Unix()
 
@@ -128,7 +134,20 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		return
 	}
 
-	logger.Debug("received NATS response", "subject", subject, "response_size", len(response))
+	logger.Info("inbound NATS response received",
+		"direction", "inbound",
+		"stage", "nats_response_received",
+		"subject", subject,
+		"connection_id", frame.ConnectionID,
+		"response_type", formatMsgType(responseType),
+		"response_size", len(response))
+	logger.Info("inbound TCP response sending",
+		"direction", "inbound",
+		"stage", "tcp_response_send",
+		"subject", subject,
+		"connection_id", frame.ConnectionID,
+		"response_type", formatMsgType(responseType),
+		"payload_size", len(response))
 	if err := p.handler.sendTCPResponseToConnection(frame.ConnectionID, frame.TID, responseType, response); err != nil {
 		logger.Error("failed to send TCP response", "error", err, "elapsed_ms", time.Since(startedAt).Milliseconds())
 		finalStatus = inboundStatusError
@@ -136,6 +155,13 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 		return
 	}
+	logger.Info("inbound TCP response sent",
+		"direction", "inbound",
+		"stage", "tcp_response_sent",
+		"subject", subject,
+		"connection_id", frame.ConnectionID,
+		"response_type", formatMsgType(responseType),
+		"elapsed_ms", time.Since(startedAt).Milliseconds())
 	p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusSuccess, inboundReasonOK)
 	finalStatus = inboundStatusSuccess
 	p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)

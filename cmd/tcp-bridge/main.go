@@ -349,10 +349,17 @@ func (a *App) Stop(ctx context.Context) error {
 
 // handleTCPRequest handles incoming TCP request frames
 func (a *App) handleTCPRequest(frame *config.Frame) {
-	a.logger.Debug("handling TCP request", "tid", frame.TID)
 	frame.ReceivedAt = time.Now()
 
 	msgType := fmt.Sprintf("0x%02x", frame.Type)
+	a.logger.Info("inbound TCP request received",
+		"direction", "inbound",
+		"stage", "tcp_request_received",
+		"tid", frame.TID,
+		"connection_id", frame.ConnectionID,
+		"msg_type", msgType,
+		"frame", frame.String(),
+		"payload_size", len(frame.Payload))
 	a.metrics.IncInboundRequests(frame.ConnectionID, msgType)
 
 	// Dispatch to bridge handler via frame dispatcher
@@ -361,7 +368,14 @@ func (a *App) handleTCPRequest(frame *config.Frame) {
 
 // handleTCPResponse handles incoming TCP response frames
 func (a *App) handleTCPResponse(frame *config.Frame) {
-	a.logger.Debug("handling TCP response", "tid", frame.TID)
+	a.logger.Info("outbound TCP response received",
+		"direction", "outbound",
+		"stage", "tcp_response_received",
+		"tid", frame.TID,
+		"connection_id", frame.ConnectionID,
+		"msg_type", fmt.Sprintf("0x%02x", frame.Type),
+		"frame", frame.String(),
+		"payload_size", len(frame.Payload))
 
 	// Match with inflight-A entries (NATS→TCP responses)
 	if handled := a.inflightMgr.GetInflightA().HandleResponse(frame); !handled {

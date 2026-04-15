@@ -120,6 +120,13 @@ func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
 	if msgType, _, ok := h.resolveOutboundRoute(msg.Subject); ok {
 		msgTypeLabel = formatMsgType(msgType)
 	}
+	h.logger.Info("outbound NATS request received",
+		"direction", "outbound",
+		"stage", "nats_request_received",
+		"subject", msg.Subject,
+		"reply", msg.Reply,
+		"msg_type", msgTypeLabel,
+		"payload_size", len(msg.Data))
 
 	if !h.outboundPool.Enqueue(msg) {
 		h.metrics.IncOutboundRequests(metricsConnectionID, msg.Subject, msgTypeLabel)
