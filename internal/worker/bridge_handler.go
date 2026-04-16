@@ -141,6 +141,13 @@ func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 	msgType := formatMsgType(frame.Type)
 	h.metrics.IncInboundRequests(frame.ConnectionID, msgType)
 
+	h.logger.Info("inbound TCP request received",
+		"stage", "tcp_request_received before_enqueue",
+		"connection_id", frame.ConnectionID,
+		"tid", frame.TID,
+		"msg_type", msgType,
+		"payload_size", len(frame.Payload))
+
 	if !h.inboundPool.Enqueue(frame) {
 		logger := h.logger.With("tid", frame.TID, "connection_id", frame.ConnectionID, "msg_type", msgType)
 		logger.Error("inbound worker queue is full")
