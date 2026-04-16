@@ -51,7 +51,7 @@ spec:
             (
               (tcp_bridge:inbound_error_ratio:2m >= 0.10)
               and
-              (tcp_bridge:inbound_responses_total:increase2m >= 5)
+              (tcp_bridge:inbound_outcomes_total:increase2m >= 5)
             )
           for: 1m
           labels:
@@ -71,7 +71,7 @@ spec:
             (
               (tcp_bridge:outbound_error_ratio:2m >= 0.10)
               and
-              (tcp_bridge:outbound_responses_total:increase2m >= 5)
+              (tcp_bridge:outbound_outcomes_total:increase2m >= 5)
             )
           for: 1m
           labels:

@@ -28,10 +28,10 @@ spec:
     - name: tcp-bridge.recording.inbound
       interval: 30s
       rules:
-        - record: tcp_bridge:inbound_responses_total:increase2m
+        - record: tcp_bridge:inbound_outcomes_total:increase2m
           expr: |
             label_replace(
-              sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_responses_total[2m])),
+              sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_outcomes_total[2m])),
               "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
             )
 
@@ -39,9 +39,9 @@ spec:
           expr: |
             label_replace(
               (
-                sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_responses_total{status=~"error|timeout|dropped"}[2m]))
+                sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_outcomes_total{status=~"error|timeout|dropped"}[2m]))
                 /
-                clamp_min(sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_responses_total[2m])), 1)
+                clamp_min(sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_inbound_outcomes_total[2m])), 1)
               ),
               "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
             )
@@ -49,10 +49,10 @@ spec:
     - name: tcp-bridge.recording.outbound
       interval: 30s
       rules:
-        - record: tcp_bridge:outbound_responses_total:increase2m
+        - record: tcp_bridge:outbound_outcomes_total:increase2m
           expr: |
             label_replace(
-              sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_responses_total[2m])),
+              sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_outcomes_total[2m])),
               "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
             )
 
@@ -60,9 +60,9 @@ spec:
           expr: |
             label_replace(
               (
-                sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_responses_total{status=~"error|timeout|dropped"}[2m]))
+                sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_outcomes_total{status=~"error|timeout|dropped"}[2m]))
                 /
-                clamp_min(sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_responses_total[2m])), 1)
+                clamp_min(sum by (job, namespace, pod, connection_id) (increase(tcp_bridge_outbound_outcomes_total[2m])), 1)
               ),
               "sys_id", "$1", "pod", ".*(tcp-bridge-[0-9]+).*"
             )

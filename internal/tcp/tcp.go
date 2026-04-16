@@ -253,7 +253,7 @@ func (r *Reader) handleFrame(frame *config.Frame) {
 	}
 
 	// Business messages are classified by configured message_type_routing.
-	if r.routing.IsRequestType(frame.Type) {
+	if r.routing.IsInboundRequestType(frame.Type) {
 		// TCP inbound request -> spawn goroutine for TCP→NATS processing
 		if r.onRequestFrame != nil {
 			r.onRequestFrame(frame)

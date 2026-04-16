@@ -82,7 +82,7 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		logger.Error("unknown message type, dropping",
 			"msg_type", msgType,
 			"connection_id", frame.ConnectionID)
-		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusDropped, inboundReasonUnknownMessageType)
+		p.handler.metrics.IncInboundOutcomes(frame.ConnectionID, msgType, inboundStatusDropped, inboundReasonUnknownMessageType)
 		finalStatus = inboundStatusDropped
 		return
 	}
@@ -129,8 +129,10 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		writeErr := p.handler.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "internal error")
 		if writeErr != nil {
 			logger.Error("failed to send TCP error response", "error", writeErr)
+		} else {
+			p.handler.metrics.IncInboundResponsesSent(frame.ConnectionID, msgType, responseSendResultError)
 		}
-		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, finalStatus, reason)
+		p.handler.metrics.IncInboundOutcomes(frame.ConnectionID, msgType, finalStatus, reason)
 		return
 	}
 
@@ -151,7 +153,7 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 	if err := p.handler.sendTCPResponseToConnection(frame.ConnectionID, frame.TID, responseType, response); err != nil {
 		logger.Error("failed to send TCP response", "error", err, "elapsed_ms", time.Since(startedAt).Milliseconds())
 		finalStatus = inboundStatusError
-		p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusError, inboundReasonTCPResponseWriteFailed)
+		p.handler.metrics.IncInboundOutcomes(frame.ConnectionID, msgType, inboundStatusError, inboundReasonTCPResponseWriteFailed)
 		p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 		return
 	}
@@ -162,7 +164,8 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		"connection_id", frame.ConnectionID,
 		"response_type", formatMsgType(responseType),
 		"elapsed_ms", time.Since(startedAt).Milliseconds())
-	p.handler.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusSuccess, inboundReasonOK)
+	p.handler.metrics.IncInboundResponsesSent(frame.ConnectionID, msgType, responseSendResultSuccess)
+	p.handler.metrics.IncInboundOutcomes(frame.ConnectionID, msgType, inboundStatusSuccess, inboundReasonOK)
 	finalStatus = inboundStatusSuccess
 	p.handler.inflightMgr.GetInflightB().Remove(frame.ConnectionID, frame.TID)
 }

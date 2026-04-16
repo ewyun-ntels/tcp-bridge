@@ -98,9 +98,11 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	if !ok {
 		logger.Error("unknown NATS subject for NATS->TCP flow", "subject", msg.Subject)
 		p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
-		p.handler.metrics.IncOutboundResponses(metricsConnectionID, subject, msgTypeLabel, outboundStatusDropped, outboundReasonUnknownSubject)
+		if err := p.handler.replyError(msg, "unknown NATS subject"); err == nil {
+			p.handler.metrics.IncOutboundResponsesSent(metricsConnectionID, subject, msgTypeLabel, responseSendResultError)
+		}
+		p.handler.metrics.IncOutboundOutcomes(metricsConnectionID, subject, msgTypeLabel, outboundStatusDropped, outboundReasonUnknownSubject)
 		finalStatus = outboundStatusDropped
-		p.handler.replyError(msg, "unknown NATS subject")
 		return
 	}
 	msgTypeLabel = formatMsgType(msgType)
@@ -150,13 +152,16 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	if !success {
 		logger.Error("all connection attempts failed", "tid", tid)
 		p.handler.inflightMgr.GetInflightA().Remove(tid)
-		p.handler.metrics.IncOutboundResponses(metricsConnectionID, subject, msgTypeLabel, status, reason)
+		if err := p.handler.replyError(msg, "all TCP connections failed or timeout"); err == nil {
+			p.handler.metrics.IncOutboundResponsesSent(metricsConnectionID, subject, msgTypeLabel, responseSendResultError)
+		}
+		p.handler.metrics.IncOutboundOutcomes(metricsConnectionID, subject, msgTypeLabel, status, reason)
 		finalStatus = status
-		p.handler.replyError(msg, "all TCP connections failed or timeout")
 		return
 	}
 
-	p.handler.metrics.IncOutboundResponses(metricsConnectionID, subject, msgTypeLabel, outboundStatusSuccess, outboundReasonOK)
+	p.handler.metrics.IncOutboundResponsesSent(metricsConnectionID, subject, msgTypeLabel, responseSendResultSuccess)
+	p.handler.metrics.IncOutboundOutcomes(metricsConnectionID, subject, msgTypeLabel, outboundStatusSuccess, outboundReasonOK)
 	finalStatus = outboundStatusSuccess
 	logger.Debug("request processed successfully", "tid", tid)
 }

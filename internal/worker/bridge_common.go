@@ -85,15 +85,19 @@ func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, ti
 	return h.sendTCPResponseToConnection(connectionID, tid, msgType, errorPayload)
 }
 
-func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) {
-	if msg.Reply != "" {
-		errorResp := map[string]string{"error": errMsg}
-		errorResponse, _ := json.Marshal(errorResp)
-		replyPublisher := h.natsClient.GetReplyPublisher()
-		if err := replyPublisher.PublishReply(msg.Reply, errorResponse); err != nil {
-			h.logger.Error("failed to send error reply", "error", err)
-		}
+func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) error {
+	if msg.Reply == "" {
+		return fmt.Errorf("reply subject is empty")
 	}
+
+	errorResp := map[string]string{"error": errMsg}
+	errorResponse, _ := json.Marshal(errorResp)
+	replyPublisher := h.natsClient.GetReplyPublisher()
+	if err := replyPublisher.PublishReply(msg.Reply, errorResponse); err != nil {
+		h.logger.Error("failed to send error reply", "error", err)
+		return err
+	}
+	return nil
 }
 
 func formatMsgType(msgType uint8) string {

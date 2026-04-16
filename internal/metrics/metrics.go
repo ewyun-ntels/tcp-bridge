@@ -25,14 +25,16 @@ type Metrics struct {
 	activeConnection *prometheus.GaugeVec
 
 	// Inbound traffic quality metrics
-	inboundRequestsTotal    *prometheus.CounterVec
-	inboundResponsesTotal   *prometheus.CounterVec
-	inboundEndToEndDuration *prometheus.HistogramVec
+	inboundRequestsTotal      *prometheus.CounterVec
+	inboundOutcomesTotal      *prometheus.CounterVec
+	inboundResponsesSentTotal *prometheus.CounterVec
+	inboundEndToEndDuration   *prometheus.HistogramVec
 
 	// Outbound traffic quality metrics
-	outboundRequestsTotal    *prometheus.CounterVec
-	outboundResponsesTotal   *prometheus.CounterVec
-	outboundEndToEndDuration *prometheus.HistogramVec
+	outboundRequestsTotal      *prometheus.CounterVec
+	outboundOutcomesTotal      *prometheus.CounterVec
+	outboundResponsesSentTotal *prometheus.CounterVec
+	outboundEndToEndDuration   *prometheus.HistogramVec
 
 	// HTTP server
 	server *http.Server
@@ -85,12 +87,20 @@ func (m *Metrics) initMetrics() {
 		[]string{"connection_id", "msg_type"},
 	)
 
-	m.inboundResponsesTotal = prometheus.NewCounterVec(
+	m.inboundOutcomesTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "tcp_bridge_inbound_responses_total",
+			Name: "tcp_bridge_inbound_outcomes_total",
 			Help: "Total number of completed inbound request outcomes",
 		},
 		[]string{"connection_id", "msg_type", "status", "reason"},
+	)
+
+	m.inboundResponsesSentTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tcp_bridge_inbound_responses_sent_total",
+			Help: "Total number of inbound TCP responses successfully sent to the external peer",
+		},
+		[]string{"connection_id", "msg_type", "result"},
 	)
 
 	m.inboundEndToEndDuration = prometheus.NewHistogramVec(
@@ -110,12 +120,20 @@ func (m *Metrics) initMetrics() {
 		[]string{"connection_id", "subject", "msg_type"},
 	)
 
-	m.outboundResponsesTotal = prometheus.NewCounterVec(
+	m.outboundOutcomesTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "tcp_bridge_outbound_responses_total",
+			Name: "tcp_bridge_outbound_outcomes_total",
 			Help: "Total number of completed outbound request outcomes",
 		},
 		[]string{"connection_id", "subject", "msg_type", "status", "reason"},
+	)
+
+	m.outboundResponsesSentTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "tcp_bridge_outbound_responses_sent_total",
+			Help: "Total number of outbound NATS replies successfully sent to the requester",
+		},
+		[]string{"connection_id", "subject", "msg_type", "result"},
 	)
 
 	m.outboundEndToEndDuration = prometheus.NewHistogramVec(
@@ -139,10 +157,12 @@ func (m *Metrics) initMetrics() {
 		m.connectionState,
 		m.activeConnection,
 		m.inboundRequestsTotal,
-		m.inboundResponsesTotal,
+		m.inboundOutcomesTotal,
+		m.inboundResponsesSentTotal,
 		m.inboundEndToEndDuration,
 		m.outboundRequestsTotal,
-		m.outboundResponsesTotal,
+		m.outboundOutcomesTotal,
+		m.outboundResponsesSentTotal,
 		m.outboundEndToEndDuration,
 	)
 }
@@ -232,8 +252,12 @@ func (m *Metrics) IncInboundRequests(connectionID string, msgType string) {
 	m.inboundRequestsTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType).Inc()
 }
 
-func (m *Metrics) IncInboundResponses(connectionID string, msgType string, status string, reason string) {
-	m.inboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, status, reason).Inc()
+func (m *Metrics) IncInboundOutcomes(connectionID string, msgType string, status string, reason string) {
+	m.inboundOutcomesTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, status, reason).Inc()
+}
+
+func (m *Metrics) IncInboundResponsesSent(connectionID string, msgType string, result string) {
+	m.inboundResponsesSentTotal.WithLabelValues(normalizeConnectionID(connectionID), msgType, result).Inc()
 }
 
 func (m *Metrics) ObserveInboundEndToEndDuration(connectionID string, msgType string, status string, duration time.Duration) {
@@ -244,8 +268,12 @@ func (m *Metrics) IncOutboundRequests(connectionID string, subject string, msgTy
 	m.outboundRequestsTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType).Inc()
 }
 
-func (m *Metrics) IncOutboundResponses(connectionID string, subject string, msgType string, status string, reason string) {
-	m.outboundResponsesTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status, reason).Inc()
+func (m *Metrics) IncOutboundOutcomes(connectionID string, subject string, msgType string, status string, reason string) {
+	m.outboundOutcomesTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, status, reason).Inc()
+}
+
+func (m *Metrics) IncOutboundResponsesSent(connectionID string, subject string, msgType string, result string) {
+	m.outboundResponsesSentTotal.WithLabelValues(normalizeConnectionID(connectionID), subject, msgType, result).Inc()
 }
 
 func (m *Metrics) ObserveOutboundEndToEndDuration(connectionID string, subject string, msgType string, status string, duration time.Duration) {

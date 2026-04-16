@@ -130,8 +130,10 @@ func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
 
 	if !h.outboundPool.Enqueue(msg) {
 		h.metrics.IncOutboundRequests(metricsConnectionID, msg.Subject, msgTypeLabel)
-		h.metrics.IncOutboundResponses(metricsConnectionID, msg.Subject, msgTypeLabel, outboundStatusDropped, outboundReasonQueueFull)
-		h.replyError(msg, "outbound worker queue is full")
+		if err := h.replyError(msg, "outbound worker queue is full"); err == nil {
+			h.metrics.IncOutboundResponsesSent(metricsConnectionID, msg.Subject, msgTypeLabel, responseSendResultError)
+		}
+		h.metrics.IncOutboundOutcomes(metricsConnectionID, msg.Subject, msgTypeLabel, outboundStatusDropped, outboundReasonQueueFull)
 	}
 }
 
@@ -139,7 +141,6 @@ func (h *BridgeHandler) HandleOutboundRequest(msg *nats.Msg) {
 func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 	frame.EnqueuedAt = time.Now()
 	msgType := formatMsgType(frame.Type)
-	h.metrics.IncInboundRequests(frame.ConnectionID, msgType)
 
 	h.logger.Info("inbound TCP request received",
 		"stage", "tcp_request_received before_enqueue",
@@ -158,8 +159,10 @@ func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 		}
 		if err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full"); err != nil {
 			logger.Error("failed to send TCP error response for dropped frame", "error", err)
+		} else {
+			h.metrics.IncInboundResponsesSent(frame.ConnectionID, msgType, responseSendResultError)
 		}
-		h.metrics.IncInboundResponses(frame.ConnectionID, msgType, inboundStatusDropped, inboundReasonQueueFull)
+		h.metrics.IncInboundOutcomes(frame.ConnectionID, msgType, inboundStatusDropped, inboundReasonQueueFull)
 	}
 }
 
@@ -179,8 +182,8 @@ func NewFrameDispatcher(logger *slog.Logger, bridge *BridgeHandler) *FrameDispat
 
 // DispatchRequestFrame dispatches a TCP request frame directly to the inbound worker pool.
 func (d *FrameDispatcher) DispatchRequestFrame(frame *config.Frame) {
-	if !d.bridge.natsConfig.MessageTypeRouting.IsRequestType(frame.Type) {
-		d.logger.Warn("non-request frame passed to handler",
+	if !d.bridge.natsConfig.MessageTypeRouting.IsInboundRequestType(frame.Type) {
+		d.logger.Warn("non-inbound request frame passed to handler",
 			"type", fmt.Sprintf("0x%02x", frame.Type), "tid", frame.TID)
 		return
 	}
@@ -194,5 +197,5 @@ func (h *BridgeHandler) handleInboundInflightExpiry(entry *inflight.InflightEntr
 	if entry.TCPReplyInfo != nil {
 		connectionID = entry.TCPReplyInfo.ConnectionID
 	}
-	h.metrics.IncInboundResponses(connectionID, msgType, inboundStatusTimeout, inboundReasonInflightExpired)
+	h.metrics.IncInboundOutcomes(connectionID, msgType, inboundStatusTimeout, inboundReasonInflightExpired)
 }
