@@ -73,12 +73,6 @@ func (h *BridgeHandler) sendTCPResponseToConnection(connectionID string, tid uin
 	return nil
 }
 
-func (h *BridgeHandler) sendTCPErrorResponse(tid uint32, msgType uint8, errMsg string) {
-	errorResp := map[string]string{"error": errMsg}
-	errorPayload, _ := json.Marshal(errorResp)
-	h.sendTCPResponse(tid, msgType, errorPayload)
-}
-
 func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, tid uint32, msgType uint8, errMsg string) error {
 	errorResp := map[string]string{"error": errMsg}
 	errorPayload, _ := json.Marshal(errorResp)
