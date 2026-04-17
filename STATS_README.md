@@ -5,7 +5,7 @@
 기준 소스:
 
 - Metric 구현: `internal/metrics/metrics.go`
-- Metric 발생 지점: `cmd/tcp-bridge/main.go`, `internal/worker/bridge_handler.go`, `internal/worker/inbound_pool.go`, `internal/worker/outbound_pool.go`
+- Metric 발생 지점: `internal/worker/bridge_handler.go`, `internal/worker/inbound_pool.go`, `internal/worker/outbound_pool.go`
 - Recording rule: `chart/templates/prometheusrule-recording.yaml`, `monitoring/tcp-bridge-recording-rule.yaml`
 - Alert rule: `chart/templates/prometheusrule-alerts.yaml`, `monitoring/tcp-bridge-prometheus-rule.yaml`
 
@@ -165,11 +165,11 @@ Flow:
 
 증가 시점:
 
-- outbound request를 처리 경로에 태울 때 1 증가
+- outbound request의 처리 결과 라벨이 확정되는 시점에 1 증가
 
 주의:
 
-- connection이 아직 선택되지 않았다면 `connection_id="unknown"`으로 기록될 수 있다
+- queue full, unknown subject, missing reply subject처럼 TCP connection 선택 전 종료된 요청은 `connection_id="unknown"`으로 기록될 수 있다
 
 ### `tcp_bridge_outbound_outcomes_total`
 
@@ -187,6 +187,8 @@ Flow:
   TCP 응답을 받고 NATS reply 송신까지 완료
 - `queue_full`
   outbound worker queue 포화
+- `missing_reply_subject`
+  reply subject 없이 들어와 즉시 거절된 요청
 - `unknown_subject`
   outbound 라우팅 대상이 없는 subject
 - `frame_serialize_failed`
@@ -206,6 +208,8 @@ Flow:
   `requests +1`, `outcomes{success,ok} +1`, `responses_sent{success} +1`
 - queue full 후 에러 reply 송신 성공:
   `requests +1`, `outcomes{dropped,queue_full} +1`, `responses_sent{error} +1`
+- reply subject 없이 즉시 거절:
+  `requests +1`, `outcomes{dropped,missing_reply_subject} +1`
 - unknown subject 거절 후 에러 reply 송신 성공:
   `requests +1`, `outcomes{dropped,unknown_subject} +1`, `responses_sent{error} +1`
 - TCP 응답 timeout 후 에러 reply 송신 성공:

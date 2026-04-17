@@ -79,6 +79,10 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	finalStatus := outboundStatusError
 	subject := msg.Subject
 	msgTypeLabel := "unknown"
+	msgType, expectedRespType, ok := p.handler.resolveOutboundRoute(msg.Subject)
+	if ok {
+		msgTypeLabel = formatMsgType(msgType)
+	}
 	defer func() {
 		if !job.receivedAt.IsZero() {
 			p.handler.metrics.ObserveOutboundEndToEndDuration(metricsConnectionID, subject, msgTypeLabel, finalStatus, time.Since(job.receivedAt))
@@ -86,6 +90,9 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	}()
 
 	if msg.Reply == "" {
+		p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
+		p.handler.metrics.IncOutboundOutcomes(metricsConnectionID, subject, msgTypeLabel, outboundStatusDropped, outboundReasonMissingReplySubject)
+		finalStatus = outboundStatusDropped
 		logger.Error(
 			"rejecting outbound message without reply subject",
 			"subject", msg.Subject,
@@ -94,7 +101,6 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	}
 
 	tid := tid.Next()
-	msgType, expectedRespType, ok := p.handler.resolveOutboundRoute(msg.Subject)
 	if !ok {
 		logger.Error("unknown NATS subject for NATS->TCP flow", "subject", msg.Subject)
 		p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
@@ -105,8 +111,6 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 		finalStatus = outboundStatusDropped
 		return
 	}
-	msgTypeLabel = formatMsgType(msgType)
-	p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
 
 	frame := &config.Frame{
 		Type:    msgType,
@@ -149,6 +153,7 @@ func (p *OutboundWorkerPool) process(job *outboundJob) {
 	if selectedConnectionID != "" {
 		metricsConnectionID = selectedConnectionID
 	}
+	p.handler.metrics.IncOutboundRequests(metricsConnectionID, subject, msgTypeLabel)
 	if !success {
 		logger.Error("all connection attempts failed", "tid", tid)
 		p.handler.inflightMgr.GetInflightA().Remove(tid)

@@ -10,6 +10,7 @@ const (
 const (
 	outboundReasonOK                    = "ok"
 	outboundReasonQueueFull             = "queue_full"
+	outboundReasonMissingReplySubject   = "missing_reply_subject"
 	outboundReasonUnknownSubject        = "unknown_subject"
 	outboundReasonFrameSerializeFailed  = "frame_serialize_failed"
 	outboundReasonNoReadyConnection     = "no_ready_connection"
