@@ -59,6 +59,46 @@
 - 송신을 시도했지만 실패했다면 `responses_sent_total`은 증가하지 않는다
 - 이런 경우 최종 결과는 `outcomes_total`에서 확인해야 한다
 
+### 2.3 `responses_sent_total`이 증가하지 않는 경우
+
+현재 구현 기준으로 `*_responses_sent_total`이 증가하지 않는 경우는 두 부류다.
+
+1. 응답 송신을 아예 하지 않는 분기
+2. 응답 송신을 시도했지만 실제 송신에 실패한 분기
+
+Inbound에서 증가하지 않는 대표 경우:
+
+- `unknown_message_type`
+  라우팅 대상이 없어 `outcomes_total{status="dropped",reason="unknown_message_type"}`만 기록하고 종료한다
+- `inflight_expired`
+  inflight cleanup callback에서 `outcomes_total{status="timeout",reason="inflight_expired"}`만 기록한다
+- `queue_full`
+  TCP 에러 응답 송신을 시도하지만 write가 실패하면 `responses_sent_total`은 증가하지 않는다
+- `nats_request_timeout`, `nats_request_failed`
+  TCP 에러 응답 송신을 시도하지만 write가 실패하면 `responses_sent_total`은 증가하지 않는다
+- `tcp_response_write_failed`
+  정상 TCP 응답 송신이 실패한 경우이므로 `responses_sent_total`은 증가하지 않는다
+
+Outbound에서 증가하지 않는 대표 경우:
+
+- `missing_reply_subject`
+  reply subject가 없어 `outcomes_total{status="dropped",reason="missing_reply_subject"}`만 기록하고 종료한다
+- `reply_publish_failed`
+  TCP 응답은 받았지만 NATS reply publish가 실패했으므로 `responses_sent_total`은 증가하지 않는다
+- `queue_full`, `unknown_subject`
+  NATS 에러 reply 송신을 시도하지만 publish가 실패하면 `responses_sent_total`은 증가하지 않는다
+- `frame_serialize_failed`, `no_ready_connection`, `tcp_request_write_failed`, `tcp_response_timeout`
+  최종 실패 후 NATS 에러 reply 송신을 시도하지만 publish가 실패하면 `responses_sent_total`은 증가하지 않는다
+
+정리:
+
+- 설계상 응답 송신 자체가 없는 분기와
+- 응답 송신을 시도했지만 실패한 분기를
+  구분해서 봐야 한다
+- 요청 처리 완료 여부는 `outcomes_total`
+- 외부 응답 송신 성공 여부는 `responses_sent_total`
+  로 해석한다
+
 ## 3. Connection Metrics
 
 ### `tcp_bridge_connection_state`

@@ -20,7 +20,7 @@ type requestPayload struct {
 }
 
 var (
-	natsURL         = flag.String("url", "nats://localhost:4222", "NATS server URL")
+	natsURL         = flag.String("url", "nats://10.255.254.22:30422", "NATS server URL")
 	requestSubject  = flag.String("subject", "tcp.subs.change", "NATS subject to request")
 	requestInterval = flag.Duration("interval", 3*time.Second, "Interval between NATS requests")
 	requestTimeout  = flag.Duration("timeout", 10*time.Second, "Request timeout")
