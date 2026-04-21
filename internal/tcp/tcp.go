@@ -240,18 +240,6 @@ func (r *Reader) handleFrame(frame *config.Frame) {
 		"type", fmt.Sprintf("0x%02x", frame.Type),
 		"payload_size", len(frame.Payload))
 
-	// Handshake frames are handled by connection manager (4.1.1.d: 0x01, 0x02)
-	if frame.IsHandshake() {
-		r.logger.Debug("handshake frame ignored in reader", "type", fmt.Sprintf("0x%02x", frame.Type))
-		return
-	}
-
-	// Ping/Pong frames are handled by connection manager (4.1.1.d: 0x03, 0x04)
-	if frame.IsPing() {
-		r.logger.Debug("ping/pong frame ignored in reader", "type", fmt.Sprintf("0x%02x", frame.Type))
-		return
-	}
-
 	// Business messages are classified by configured message_type_routing.
 	if r.routing.IsInboundRequestType(frame.Type) {
 		// TCP inbound request -> spawn goroutine for TCP→NATS processing

@@ -60,9 +60,10 @@ type ConnMgr struct {
 	sysID string
 
 	// 연결 상태 (DISCONNECTED, CONNECTING, READY)
-	mu    sync.RWMutex
-	state string
-	conn  net.Conn
+	mu      sync.RWMutex
+	writeMu sync.Mutex
+	state   string
+	conn    net.Conn
 
 	// Lifecycle control
 	ctx    context.Context
@@ -486,8 +487,11 @@ func (c *ConnMgr) setState(newState string) {
 func (c *ConnMgr) connectionLoop() {
 	defer close(c.done)
 
-	ticker := time.NewTicker(5 * time.Second) // Reconnect interval
-	defer ticker.Stop()
+	const reconnectInterval = 5 * time.Second
+
+	// Use a timer so the next retry is scheduled after the current attempt finishes.
+	timer := time.NewTimer(0)
+	defer timer.Stop()
 
 	for {
 		select {
@@ -495,17 +499,12 @@ func (c *ConnMgr) connectionLoop() {
 			c.cleanupConnection()
 			return
 
-		case <-ticker.C:
-			// Drain any buffered ticks to prevent immediate retry
-			select {
-			case <-ticker.C:
-			default:
-			}
-
+		case <-timer.C:
 			state := c.GetState()
 			if state == config.ConnStateDisconnected || state == config.ConnStateConnectFailed {
 				c.attemptConnection()
 			}
+			timer.Reset(reconnectInterval)
 		}
 	}
 }
@@ -608,9 +607,12 @@ func (c *ConnMgr) performHandshake() error {
 		return fmt.Errorf("failed to serialize hello frame: %w", err)
 	}
 
-	conn.SetWriteDeadline(time.Now().Add(c.config.HandshakeTimeout))
-	if _, err := conn.Write(helloData); err != nil {
+	n, err := c.writeWithOptions(helloData, c.config.HandshakeTimeout, false)
+	if err != nil {
 		return fmt.Errorf("failed to send hello: %w", err)
+	}
+	if n != len(helloData) {
+		return fmt.Errorf("incomplete hello write: wrote %d, expected %d", n, len(helloData))
 	}
 
 	c.logger.Info(">>> HELLO-REQ sent", "tid", helloFrame.TID, "sys-id", helloReq.SysID, "branch-name", helloReq.BranchName)
@@ -809,7 +811,7 @@ func (c *ConnMgr) readLoop() {
 
 		// Validate payload length
 		if payloadLen > c.config.MaxFrameSize {
-			c.logger.Error("frame too large", "size", payloadLen, "max", c.config.MaxFrameSize)
+			c.logger.Error(">>>>>>> frame too large", "size", payloadLen, "max", c.config.MaxFrameSize)
 			return
 		}
 
@@ -1032,11 +1034,6 @@ func (c *ConnMgr) pingLoop() {
 
 // sendPing sends a PING frame to the server
 func (c *ConnMgr) sendPing() error {
-	conn := c.GetConn()
-	if conn == nil {
-		return fmt.Errorf("no connection available")
-	}
-
 	// PING frame uses CRLF payload so Body Length matches transmitted bytes.
 	pingFrame := &config.Frame{
 		Type:    config.FrameTypePing,
@@ -1049,9 +1046,12 @@ func (c *ConnMgr) sendPing() error {
 		return fmt.Errorf("failed to serialize ping frame: %w", err)
 	}
 
-	conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
-	if _, err := conn.Write(pingData); err != nil {
+	n, err := c.writeWithOptions(pingData, c.config.WriteTimeout, false)
+	if err != nil {
 		return fmt.Errorf("failed to send ping: %w", err)
+	}
+	if n != len(pingData) {
+		return fmt.Errorf("incomplete ping write: wrote %d, expected %d", n, len(pingData))
 	}
 
 	// PING은 keep-alive용이므로 activity time을 갱신하지 않음
@@ -1085,20 +1085,27 @@ func (c *ConnMgr) takeDisconnectReason(fallback string) string {
 	return fallback
 }
 
-// Write sends data through the connection and updates activity time
-func (c *ConnMgr) Write(data []byte) (int, error) {
+// writeWithOptions serializes all writes for a single connection to preserve frame boundaries.
+func (c *ConnMgr) writeWithOptions(data []byte, timeout time.Duration, updateActivity bool) (int, error) {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+
 	conn := c.GetConn()
 	if conn == nil {
 		return 0, fmt.Errorf("no connection available")
 	}
 
-	conn.SetWriteDeadline(time.Now().Add(c.config.WriteTimeout))
+	conn.SetWriteDeadline(time.Now().Add(timeout))
 	n, err := conn.Write(data)
-	if err == nil && n > 0 {
-		// Update last activity time (message sent)
+	if err == nil && n > 0 && updateActivity {
 		c.updateLastActivity()
 	}
 	return n, err
+}
+
+// Write sends data through the connection and updates activity time
+func (c *ConnMgr) Write(data []byte) (int, error) {
+	return c.writeWithOptions(data, c.config.WriteTimeout, true)
 }
 
 func classifyDialError(err error) string {
