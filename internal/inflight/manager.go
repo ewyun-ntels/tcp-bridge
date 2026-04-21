@@ -360,9 +360,7 @@ func (ia *InflightA) cleanupExpired() {
 	if len(expiredTIDs) > 0 {
 		ia.mu.Lock()
 		for _, tid := range expiredTIDs {
-			if _, exists := ia.entries[tid]; exists {
-				delete(ia.entries, tid)
-			}
+			delete(ia.entries, tid)
 		}
 		ia.mu.Unlock()
 
@@ -486,9 +484,7 @@ func (ib *InflightB) cleanupExpired() {
 	if len(expiredKeys) > 0 {
 		ib.mu.Lock()
 		for _, key := range expiredKeys {
-			if _, exists := ib.entries[key]; exists {
-				delete(ib.entries, key)
-			}
+			delete(ib.entries, key)
 		}
 		ib.mu.Unlock()
 
