@@ -40,7 +40,7 @@ type keyListEntry struct {
 
 type handshakeResponse struct {
 	SysID        string         `json:"sys-id"`
-	Code         int            `json:"code"`
+	Code         string         `json:"code"`
 	PingInterval int            `json:"ping-interval"`
 	KeyList      []keyListEntry `json:"keyList"`
 	Cause        string         `json:"cause"`
@@ -158,8 +158,9 @@ func performHandshake(state *connectionState) error {
 	}
 
 	ackPayload, err := json.Marshal(handshakeResponse{
-		SysID:        sysID,
-		Code:         200,
+		SysID: sysID,
+		// tcp-bridge currently parses ACK code as a string.
+		Code:         "200",
 		PingInterval: 30,
 		KeyList: []keyListEntry{
 			{
