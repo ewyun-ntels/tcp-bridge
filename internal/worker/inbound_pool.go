@@ -126,7 +126,7 @@ func (p *InboundWorkerPool) process(frame *config.Frame) {
 		} else {
 			finalStatus = inboundStatusError
 		}
-		writeErr := p.handler.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "internal error")
+		writeErr := p.handler.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType)
 		if writeErr != nil {
 			logger.Error("failed to send TCP error response", "error", writeErr)
 		} else {

@@ -1,0 +1,18 @@
+{
+  "payloadTemplate": {
+    "msg-type": "",
+    "code-type": "",
+    "sys-id": "",
+    "branch-name": "",
+    "tid": "",
+    "mdn" : "",
+	  "new-mdn" : "",
+    "result-code": "FA2004",
+    "subsList": [
+      {
+        "mdn": "",
+        "cell-list": []
+      }
+    ]
+  }
+}

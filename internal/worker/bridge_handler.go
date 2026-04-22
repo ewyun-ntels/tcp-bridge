@@ -22,6 +22,7 @@ type BridgeHandler struct {
 	outboundConfig *config.MessageHandlerPoolConfig
 	inboundConfig  *config.MessageHandlerPoolConfig
 	natsConfig     *config.NATSConfig
+	pgFormatter    *config.PGResponseFormatterConfig
 
 	natsClient  *tcpnats.Client
 	tcpSender   *tcp.Sender
@@ -42,6 +43,7 @@ func NewBridgeHandler(
 	outboundConfig *config.MessageHandlerPoolConfig,
 	inboundConfig *config.MessageHandlerPoolConfig,
 	natsConfig *config.NATSConfig,
+	pgFormatter *config.PGResponseFormatterConfig,
 	natsClient *tcpnats.Client,
 	tcpSender *tcp.Sender,
 	inflightMgr *inflight.InflightManager,
@@ -53,6 +55,7 @@ func NewBridgeHandler(
 		outboundConfig: outboundConfig,
 		inboundConfig:  inboundConfig,
 		natsConfig:     natsConfig,
+		pgFormatter:    pgFormatter,
 		natsClient:     natsClient,
 		tcpSender:      tcpSender,
 		inflightMgr:    inflightMgr,
@@ -157,7 +160,7 @@ func (h *BridgeHandler) HandleInboundFrame(frame *config.Frame) {
 		if responseType == 0 {
 			responseType = frame.Type
 		}
-		if err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType, "inbound worker queue is full"); err != nil {
+		if err := h.sendTCPErrorResponseToConnection(frame.ConnectionID, frame.TID, responseType); err != nil {
 			logger.Error("failed to send TCP error response for dropped frame", "error", err)
 		} else {
 			h.metrics.IncInboundResponsesSent(frame.ConnectionID, msgType, responseSendResultError)

@@ -70,6 +70,8 @@ message_handler:
     retry_attempts: 10            # 같은 priority에서 재시도 횟수
     worker_count: 20              # NATS→TCP worker 수
     queue_size: 500               # NATS→TCP 작업 큐 크기
+    error_reply:
+      result_code: "FATB2004"
     
     # 참고: 최대 소요 시간은 자동 계산됨
     # = endpoints × retry_attempts × response_timeout
@@ -82,6 +84,9 @@ message_handler:
                                 # - NATS는 자체 고가용성 클러스터 구성으로 재시도 불필요
     worker_count: 20            # TCP→NATS worker 수
     queue_size: 500             # TCP→NATS 작업 큐 크기
+
+pg_response_formatter:
+  fle: "./formatter_pg_result.json"
 
 metrics:
   enabled: true

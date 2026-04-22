@@ -73,10 +73,29 @@ func (h *BridgeHandler) sendTCPResponseToConnection(connectionID string, tid uin
 	return nil
 }
 
-func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, tid uint32, msgType uint8, errMsg string) error {
-	errorResp := map[string]string{"error": errMsg}
-	errorPayload, _ := json.Marshal(errorResp)
+func (h *BridgeHandler) sendTCPErrorResponseToConnection(connectionID string, tid uint32, msgType uint8) error {
+	errorPayload, err := h.buildTCPErrorPayload()
+	if err != nil {
+		return err
+	}
 	return h.sendTCPResponseToConnection(connectionID, tid, msgType, errorPayload)
+}
+
+func (h *BridgeHandler) buildTCPErrorPayload() ([]byte, error) {
+	if h.pgFormatter != nil && h.pgFormatter.Template.PayloadTemplate != nil {
+		payload, err := json.Marshal(h.pgFormatter.Template.PayloadTemplate)
+		if err != nil {
+			return nil, fmt.Errorf("marshal pg response formatter payload template: %w", err)
+		}
+		return payload, nil
+	}
+
+	errorResp := map[string]string{"error": "internal error"}
+	errorPayload, err := json.Marshal(errorResp)
+	if err != nil {
+		return nil, fmt.Errorf("marshal fallback error payload: %w", err)
+	}
+	return errorPayload, nil
 }
 
 func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) error {
@@ -84,10 +103,8 @@ func (h *BridgeHandler) replyError(msg *nats.Msg, errMsg string) error {
 		return fmt.Errorf("reply subject is empty")
 	}
 
-	errorResp := map[string]string{"error": errMsg}
-	errorResponse, _ := json.Marshal(errorResp)
 	replyPublisher := h.natsClient.GetReplyPublisher()
-	if err := replyPublisher.PublishReply(msg.Reply, errorResponse); err != nil {
+	if err := replyPublisher.PublishError(msg.Reply, h.outboundConfig.ErrorReply.ResultCode, errMsg); err != nil {
 		h.logger.Error("failed to send error reply", "error", err)
 		return err
 	}

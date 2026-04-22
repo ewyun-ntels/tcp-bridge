@@ -264,9 +264,12 @@ func (rp *ReplyPublisher) PublishReply(replySubject string, data []byte) error {
 	return nil
 }
 
-// PublishError publishes an error response to the given subject
-func (rp *ReplyPublisher) PublishError(replySubject string, errMsg string) error {
-	errorResp := map[string]string{"error": errMsg}
+// PublishError publishes an error response to the given subject.
+func (rp *ReplyPublisher) PublishError(replySubject string, resultCode string, errMsg string) error {
+	errorResp := map[string]string{
+		"result-code": resultCode,
+		"cause":       errMsg,
+	}
 	errorData, _ := json.Marshal(errorResp)
 	return rp.PublishReply(replySubject, errorData)
 }

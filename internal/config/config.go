@@ -1,8 +1,10 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,14 +22,15 @@ import (
 // - metrics: Prometheus 메트릭 설정 (HTTP 포트, 경로, 기본 runtime 메트릭 포함 여부)
 // - logging: 로그 레벨 설정 (debug/info/warn/error)
 type Config struct {
-	Server         ServerConfig         `yaml:"server"`
-	TCP            TCPConfig            `yaml:"tcp"`
-	NATS           NATSConfig           `yaml:"nats"`
-	MessageHandler MessageHandlerConfig `yaml:"message_handler"`
-	Queue          QueueConfig          `yaml:"queue"`
-	Metrics        MetricsConfig        `yaml:"metrics"`
-	Logging        LoggingConfig        `yaml:"logging"`
-	Alerta         AlertaConfig         `yaml:"alerta"`
+	Server              ServerConfig              `yaml:"server"`
+	TCP                 TCPConfig                 `yaml:"tcp"`
+	NATS                NATSConfig                `yaml:"nats"`
+	MessageHandler      MessageHandlerConfig      `yaml:"message_handler"`
+	Queue               QueueConfig               `yaml:"queue"`
+	PGResponseFormatter PGResponseFormatterConfig `yaml:"pg_response_formatter"`
+	Metrics             MetricsConfig             `yaml:"metrics"`
+	Logging             LoggingConfig             `yaml:"logging"`
+	Alerta              AlertaConfig              `yaml:"alerta"`
 }
 
 // ServerConfig contains general server configuration
@@ -45,7 +48,7 @@ type ServerConfig struct {
 // - 연결 실패 시 자동으로 다음 우선순위 endpoint로 재연결 시도
 // - READY 상태의 가장 높은 우선순위 연결을 활성 연결으로 사용
 //
-// Frame 프로토콜 (4.1):
+// Frame 프로토콜 :
 // - Header: 8 bytes
 //   - Byte 1: Extension Bit(1) + Protocol Version(2) + Reserved(5)
 //   - Byte 2: Message Type
@@ -76,7 +79,7 @@ type TCPConfig struct {
 
 	// Hello/ACK handshake
 	HandshakeTimeout time.Duration `yaml:"handshake_timeout"` // HELLO/ACK handshake timeout
-	SysPrefixID      string        `yaml:"sys_prefix_id"`      // Peer Name Prefix (POD_INDEX 또는 Pod 이름에서 추출한 index가 추가되어 최종 SysID 생성)
+	SysPrefixID      string        `yaml:"sys_prefix_id"`     // Peer Name Prefix (POD_INDEX 또는 Pod 이름에서 추출한 index가 추가되어 최종 SysID 생성)
 	BranchName       string        `yaml:"branch_name"`       // 국사명 (SS/DS/BR)
 
 	// Ping/Pong
@@ -218,19 +221,37 @@ type MessageHandlerConfig struct {
 	Inbound  MessageHandlerPoolConfig `yaml:"inbound"`  // TCP→NATS processing
 }
 
+// ErrorReplyConfig represents outbound NATS error reply settings.
+type ErrorReplyConfig struct {
+	ResultCode string `yaml:"result_code"`
+}
+
 // MessageHandlerPoolConfig represents configuration for message handling
 type MessageHandlerPoolConfig struct {
-	Timeout         time.Duration `yaml:"timeout"`          // 전체 처리 timeout (optional, 안전장치)
-	ResponseTimeout time.Duration `yaml:"response_timeout"` // 각 시도별 응답 대기 시간
-	RetryAttempts   int           `yaml:"retry_attempts"`   // 같은 connection 재시도 횟수
-	WorkerCount     int           `yaml:"worker_count"`     // 처리 worker 수
-	QueueSize       int           `yaml:"queue_size"`       // 처리 큐 크기
+	Timeout         time.Duration    `yaml:"timeout"`          // 전체 처리 timeout (optional, 안전장치)
+	ResponseTimeout time.Duration    `yaml:"response_timeout"` // 각 시도별 응답 대기 시간
+	RetryAttempts   int              `yaml:"retry_attempts"`   // 같은 connection 재시도 횟수
+	WorkerCount     int              `yaml:"worker_count"`     // 처리 worker 수
+	QueueSize       int              `yaml:"queue_size"`       // 처리 큐 크기
+	ErrorReply      ErrorReplyConfig `yaml:"error_reply"`      // outbound NATS error reply payload settings
 }
 
 // QueueConfig contains queue configuration
 type QueueConfig struct {
 	SendQueueSize int           `yaml:"send_queue_size"`
 	SendTimeout   time.Duration `yaml:"send_timeout"`
+}
+
+// PGResponseFormatterConfig defines the formatter file path and loaded template.
+type PGResponseFormatterConfig struct {
+	File string `yaml:"fle"`
+
+	Template PGResponseFormatterTemplate `yaml:"-"`
+}
+
+// PGResponseFormatterTemplate is the JSON structure loaded from formatter_pg_result.json.
+type PGResponseFormatterTemplate struct {
+	PayloadTemplate map[string]interface{} `json:"payloadTemplate"`
 }
 
 // MetricsConfig contains metrics configuration
@@ -289,7 +310,37 @@ func LoadConfig(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("config validation failed: %w", err)
 	}
 
+	if err := loadPGResponseFormatter(&cfg, configPath); err != nil {
+		return nil, fmt.Errorf("failed to load pg response formatter: %w", err)
+	}
+
 	return &cfg, nil
+}
+
+func loadPGResponseFormatter(cfg *Config, configPath string) error {
+	formatterPath := cfg.PGResponseFormatter.File
+	if !filepath.IsAbs(formatterPath) {
+		formatterPath = filepath.Join(filepath.Dir(configPath), formatterPath)
+	}
+
+	data, err := os.ReadFile(formatterPath)
+	if err != nil {
+		return fmt.Errorf("read %q: %w", formatterPath, err)
+	}
+
+	var template PGResponseFormatterTemplate
+	if err := json.Unmarshal(data, &template); err != nil {
+		return fmt.Errorf("parse %q: %w", formatterPath, err)
+	}
+
+	if template.PayloadTemplate == nil {
+		return fmt.Errorf("parse %q: missing payloadTemplate", formatterPath)
+	}
+
+	cfg.PGResponseFormatter.Template = template
+	cfg.PGResponseFormatter.File = formatterPath
+
+	return nil
 }
 
 // Validate checks the configuration for invalid or missing values.
@@ -329,10 +380,17 @@ func (cfg *Config) Validate() error {
 	if cfg.MessageHandler.Inbound.ResponseTimeout <= 0 {
 		errs = append(errs, "message_handler.inbound.response_timeout must be > 0")
 	}
+	if cfg.MessageHandler.Outbound.ErrorReply.ResultCode == "" {
+		errs = append(errs, "message_handler.outbound.error_reply.result_code is required")
+	}
 
 	// Metrics port
 	if cfg.Metrics.Enabled && (cfg.Metrics.Port <= 0 || cfg.Metrics.Port > 65535) {
 		errs = append(errs, fmt.Sprintf("metrics.port: invalid port %d (must be 1-65535)", cfg.Metrics.Port))
+	}
+
+	if cfg.PGResponseFormatter.File == "" {
+		errs = append(errs, "pg_response_formatter.fle is required")
 	}
 
 	if len(errs) > 0 {
@@ -438,12 +496,20 @@ func setDefaults(cfg *Config) {
 		cfg.MessageHandler.Inbound.QueueSize = 128
 	}
 
+	if cfg.MessageHandler.Outbound.ErrorReply.ResultCode == "" {
+		cfg.MessageHandler.Outbound.ErrorReply.ResultCode = "FATB2004"
+	}
+
 	if cfg.Queue.SendQueueSize == 0 {
 		cfg.Queue.SendQueueSize = 10000
 	}
 
 	if cfg.Queue.SendTimeout == 0 {
 		cfg.Queue.SendTimeout = 5 * time.Second
+	}
+
+	if cfg.PGResponseFormatter.File == "" {
+		cfg.PGResponseFormatter.File = "./formatter_pg_result.json"
 	}
 
 	if cfg.Metrics.Port == 0 {

@@ -76,6 +76,7 @@ func main() {
 
 	// Setup logger
 	logger := setupLogger(cfg.Logging)
+	logger.Info("pg response formatter loaded", "file", cfg.PGResponseFormatter.File)
 
 	// Create application
 	app := NewApp(cfg, logger)
@@ -252,6 +253,7 @@ func (a *App) initializeComponents() {
 		&a.config.MessageHandler.Outbound,
 		&a.config.MessageHandler.Inbound,
 		&a.config.NATS,
+		&a.config.PGResponseFormatter,
 		a.natsClient,
 		a.tcpSender,
 		a.inflightMgr,
