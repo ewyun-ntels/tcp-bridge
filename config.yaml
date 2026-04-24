@@ -7,10 +7,12 @@ server:
 tcp:
   # External TCP servers (tcp-bridge connects as client)
   endpoints:
-    - host: "127.0.0.1"
+    - name: "PG01"
+      host: "127.0.0.1"
       port: 8000
       priority: 0  # Primary (highest priority)
-    - host: "127.0.0.1" 
+    - name: "PG02"
+      host: "127.0.0.1" 
       port: 7000
       priority: 1  # Secondary
   

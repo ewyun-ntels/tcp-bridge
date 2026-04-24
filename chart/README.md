@@ -48,10 +48,12 @@ image:
 config:
   tcp:
     endpoints:
-      - host: "tcp-server-1.example.com"
+      - name: "PG01"
+        host: "tcp-server-1.example.com"
         port: 8000
         priority: 0  # Primary
-      - host: "tcp-server-2.example.com"
+      - name: "PG02"
+        host: "tcp-server-2.example.com"
         port: 8000
         priority: 1  # Secondary
 ```

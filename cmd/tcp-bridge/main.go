@@ -58,6 +58,8 @@ type App struct {
 
 	// Alerta
 	alertaClient *alerta.Client // Alerta 알람 클라이언트
+
+	connectionDisplayNames map[string]string
 }
 
 func main() {
@@ -200,6 +202,13 @@ func (a *App) initializeComponents() {
 	// Create metrics
 	a.metrics = metrics.NewMetrics(a.logger.With("component", "metrics"), &a.config.Metrics)
 
+	a.connectionDisplayNames = make(map[string]string, len(a.config.TCP.Endpoints))
+	for _, ep := range a.config.TCP.Endpoints {
+		connID := fmt.Sprintf("conn_%d", ep.Priority)
+		a.connectionDisplayNames[connID] = ep.DisplayName(connID)
+	}
+	a.metrics.SetConnectionNameResolver(a.connectionDisplayName)
+
 	// Create connection manager
 	a.connMgr = connection.NewConnectionManager(a.logger.With("component", "conn-manager"), &a.config.TCP)
 
@@ -221,10 +230,11 @@ func (a *App) initializeComponents() {
 
 	// Set connection state change callback for metrics
 	a.connMgr.SetStateChangeCallback(func(connID string, endpoint string, state string) {
+		connName := a.connectionDisplayName(connID)
 		a.metrics.SetConnectionState(connID, endpoint, state)
 		// Alerta 알람 전송
 		priority := connPriority[connID]
-		a.alertaClient.SendConnectionStateAlert(connID, endpoint, state, priority)
+		a.alertaClient.SendConnectionStateAlert(connID, connName, endpoint, state, priority)
 	})
 	a.connMgr.SetActiveConnectionChangeCallback(func(from string, to string, reason string) {
 		a.metrics.SetActiveConnection(connectionIDs(a.connMgr.GetConnections()), normalizeActiveConnectionID(to))
@@ -322,9 +332,11 @@ func (a *App) Stop(ctx context.Context) error {
 	// Graceful shutdown: 프로세스 다운 알림 전송 (비동기)
 	for i, conn := range a.connMgr.GetConnections() {
 		if conn != nil {
-			if err := a.alertaClient.SendShutdownAlert(ctx, conn.ID(), conn.GetEndpointAddress(), i); err != nil {
+			connName := a.connectionDisplayName(conn.ID())
+			if err := a.alertaClient.SendShutdownAlert(ctx, conn.ID(), connName, conn.GetEndpointAddress(), i); err != nil {
 				a.logger.Warn("failed to send shutdown alert",
 					"conn_id", conn.ID(),
+					"conn_name", connName,
 					"endpoint", conn.GetEndpointAddress(),
 					"priority", i,
 					"error", err)
@@ -406,6 +418,16 @@ func connectionIDs(connections []*connection.ConnMgr) []string {
 		}
 	}
 	return ids
+}
+
+func (a *App) connectionDisplayName(connectionID string) string {
+	if connectionID == "" || connectionID == "unknown" {
+		return "unknown"
+	}
+	if name, ok := a.connectionDisplayNames[connectionID]; ok && name != "" {
+		return name
+	}
+	return connectionID
 }
 
 func normalizeActiveConnectionID(connectionID string) string {

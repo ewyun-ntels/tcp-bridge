@@ -89,6 +89,7 @@ type TCPConfig struct {
 
 // TCPEndpoint represents a TCP connection endpoint
 type TCPEndpoint struct {
+	Name     string `yaml:"name"`
 	Host     string `yaml:"host"`
 	Port     int    `yaml:"port"`
 	Priority int    `yaml:"priority"`
@@ -290,6 +291,15 @@ func (e TCPEndpoint) Address() string {
 	return fmt.Sprintf("%s:%d", e.Host, e.Port)
 }
 
+// DisplayName returns the operator-facing endpoint name.
+// Falls back to the stable internal connection ID when name is not configured.
+func (e TCPEndpoint) DisplayName(fallback string) string {
+	if name := strings.TrimSpace(e.Name); name != "" {
+		return name
+	}
+	return fallback
+}
+
 // LoadConfig loads configuration from file
 func LoadConfig(configPath string) (*Config, error) {
 	data, err := os.ReadFile(configPath)
@@ -348,6 +358,7 @@ func loadPGResponseFormatter(cfg *Config, configPath string) error {
 // or values that could be set to invalid ranges.
 func (cfg *Config) Validate() error {
 	var errs []string
+	endpointNames := make(map[string]int)
 
 	// TCP endpoints
 	if len(cfg.TCP.Endpoints) == 0 {
@@ -360,6 +371,15 @@ func (cfg *Config) Validate() error {
 		if ep.Port <= 0 || ep.Port > 65535 {
 			errs = append(errs, fmt.Sprintf("tcp.endpoints[%d]: invalid port %d (must be 1-65535)", i, ep.Port))
 		}
+		name := strings.TrimSpace(ep.Name)
+		if name == "" {
+			continue
+		}
+		if prev, exists := endpointNames[name]; exists {
+			errs = append(errs, fmt.Sprintf("tcp.endpoints[%d]: duplicate name %q (already used by tcp.endpoints[%d])", i, name, prev))
+			continue
+		}
+		endpointNames[name] = i
 	}
 
 	// NATS URLs

@@ -55,13 +55,16 @@ server:
 
 tcp:
   endpoints:
-    - host: "127.0.0.1"
+    - name: "PG01"
+      host: "127.0.0.1"
       port: 8000
       priority: 0
-    - host: "127.0.0.1"
+    - name: "PG02"
+      host: "127.0.0.1"
       port: 7000
       priority: 1
-    - host: "127.0.0.1"
+    - name: "PG03"
+      host: "127.0.0.1"
       port: 7070
       priority: 2
   connect_timeout: "2s"

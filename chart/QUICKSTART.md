@@ -129,7 +129,8 @@ config:
   
   tcp:
     endpoints:
-      - host: "your-tcp-server-host"
+      - name: "PG01"
+        host: "your-tcp-server-host"
         port: 8000
         priority: 0
 

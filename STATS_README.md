@@ -104,7 +104,7 @@ Outbound에서 증가하지 않는 대표 경우:
 ### `tcp_bridge_connection_state`
 
 - Type: `gauge`
-- Labels: `connection_id`, `endpoint`
+- Labels: `connection_id`, `connection_name`, `endpoint`
 - 값:
   - `0`: disconnected
   - `1`: connecting
@@ -113,7 +113,7 @@ Outbound에서 증가하지 않는 대표 경우:
 ### `tcp_bridge_selected_connection`
 
 - Type: `gauge`
-- Labels: `connection_id`
+- Labels: `connection_id`, `connection_name`
 - 값:
   - `1`: selected
   - `0`: not selected
@@ -127,7 +127,7 @@ Flow:
 ### `tcp_bridge_inbound_requests_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `msg_type`
+- Labels: `connection_id`, `connection_name`, `msg_type`
 - 의미: TCP에서 inbound request를 수신한 총량
 
 증가 시점:
@@ -137,7 +137,7 @@ Flow:
 ### `tcp_bridge_inbound_outcomes_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `msg_type`, `status`, `reason`
+- Labels: `connection_id`, `connection_name`, `msg_type`, `status`, `reason`
 - 의미: inbound 요청의 최종 처리 결과 총량
 
 증가 시점:
@@ -177,7 +177,7 @@ Flow:
 ### `tcp_bridge_inbound_responses_sent_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `msg_type`, `result`
+- Labels: `connection_id`, `connection_name`, `msg_type`, `result`
 - 의미: 외부 TCP peer로 응답 송신에 성공한 총량
 
 증가 시점:
@@ -188,7 +188,7 @@ Flow:
 ### `tcp_bridge_inbound_end_to_end_duration_seconds`
 
 - Type: `histogram`
-- Labels: `connection_id`, `msg_type`, `status`
+- Labels: `connection_id`, `connection_name`, `msg_type`, `status`
 - 의미: inbound 요청 수신부터 최종 종료까지의 전체 시간
 
 ## 5. Outbound Metrics
@@ -200,7 +200,7 @@ Flow:
 ### `tcp_bridge_outbound_requests_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `subject`, `msg_type`
+- Labels: `connection_id`, `connection_name`, `subject`, `msg_type`
 - 의미: NATS에서 outbound request를 수신한 총량
 
 증가 시점:
@@ -209,12 +209,12 @@ Flow:
 
 주의:
 
-- queue full, unknown subject, missing reply subject처럼 TCP connection 선택 전 종료된 요청은 `connection_id="unknown"`으로 기록될 수 있다
+- queue full, unknown subject, missing reply subject처럼 TCP connection 선택 전 종료된 요청은 `connection_id="unknown"`, `connection_name="unknown"`으로 기록될 수 있다
 
 ### `tcp_bridge_outbound_outcomes_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `subject`, `msg_type`, `status`, `reason`
+- Labels: `connection_id`, `connection_name`, `subject`, `msg_type`, `status`, `reason`
 - 의미: outbound 요청의 최종 처리 결과 총량
 
 증가 시점:
@@ -260,7 +260,7 @@ Flow:
 ### `tcp_bridge_outbound_responses_sent_total`
 
 - Type: `counter`
-- Labels: `connection_id`, `subject`, `msg_type`, `result`
+- Labels: `connection_id`, `connection_name`, `subject`, `msg_type`, `result`
 - 의미: NATS requester에게 reply 송신에 성공한 총량
 
 증가 시점:
@@ -271,7 +271,7 @@ Flow:
 ### `tcp_bridge_outbound_end_to_end_duration_seconds`
 
 - Type: `histogram`
-- Labels: `connection_id`, `subject`, `msg_type`, `status`
+- Labels: `connection_id`, `connection_name`, `subject`, `msg_type`, `status`
 - 의미: outbound 요청 수신부터 최종 종료까지의 전체 시간
 
 ## 6. 운영 쿼리

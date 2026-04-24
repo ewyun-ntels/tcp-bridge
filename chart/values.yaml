@@ -95,10 +95,12 @@ config:
 
   tcp:
     endpoints:
-      - host: "192.168.15.201"
+      - name: "PG01"
+        host: "192.168.15.201"
         port: 7000
         priority: 0
-      - host: "192.168.15.201"
+      - name: "PG02"
+        host: "192.168.15.201"
         port: 8000
         priority: 1
     
