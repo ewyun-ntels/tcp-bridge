@@ -108,6 +108,6 @@ alerta:
   environment: "RealTimeAlert"
 
   alerts:
-    - event: "PGConnectionState"
+    - item: "PGConnectionState"
       group: "Connection"
       err_code: "1004"

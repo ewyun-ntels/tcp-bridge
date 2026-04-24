@@ -281,7 +281,7 @@ type AlertaConfig struct {
 
 // AlertDef defines an individual alert type
 type AlertDef struct {
-	Event   string `yaml:"event"`
+	Item    string `yaml:"item"`
 	Group   string `yaml:"group"`
 	ErrCode string `yaml:"err_code"`
 }

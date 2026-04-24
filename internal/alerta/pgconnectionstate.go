@@ -9,7 +9,34 @@ import (
 	"tcp-bridge/internal/config"
 )
 
-const pgConnectionStateEvent = "PGConnectionState"
+/*
+{
+  "resource":    "upmc-1",           // 필수 - 모니터링 대상  , key
+  "event":       "PGConnectionState", // 필수 - 이벤트 이름   , key
+
+  "environment": "Production",       // 기본값: ""  (ALLOWED_ENVIRONMENTS 설정에 따라 제한), key
+  "severity":    "critical",         // 기본값: "normal"
+  "status":      "open",             // 기본값: "open"  (보통 자동 결정, 직접 지정 드묾)
+
+  "service":     ["PG-TEST"],        // 기본값: []   (문자열 배열)
+  "group":       "Database",         // 기본값: "Misc"
+  "value":       "CONNECTING",       // 기본값: null  (문자열)
+  "text":        "peer=10.255.254.2", // 기본값: ""   (description)
+
+  "correlate":   ["PGConnectionState", "PGStateChanged"], // 기본값: []  (연관 이벤트 목록)
+  "tags":        ["pg", "upmc"],     // 기본값: []
+  "attributes":  {"region": "kr"},   // 기본값: {}   (커스텀 키-값, . $ 불가)
+
+  "origin":      "my-monitor/host1", // 기본값: "스크립트명/호스트명"
+  "type":        "exceptionAlert",   // 기본값: "exceptionAlert"
+  "createTime":  "2026-04-24T13:26:00.000Z", // 기본값: 현재시각(UTC)
+  "timeout":     86400,              // 기본값: ALERT_TIMEOUT 설정값 (초, 정수)
+  "rawData":     "...",              // 기본값: null  (원본 데이터 문자열)
+  "customer":    "upmc-1:PG-TEST"    // 기본값: null  (단일 문자열)  , key
+}
+*/
+
+const pgConnectionStateItem = "PGConnectionState"
 
 // SendConnectionStateAlert sends a PGConnectionState alert for TCP connection state changes.
 // READY → severity "normal" (errCode 비포함), 나머지 → severity "critical" (errCode 포함)
@@ -30,7 +57,7 @@ func (c *Client) SendConnectionStateAlert(connID, connName, endpoint, state stri
 	c.lastAlertedState[connID] = state
 	c.mu.Unlock()
 
-	alertDef, ok := c.alertMap[pgConnectionStateEvent]
+	alertDef, ok := c.alertMap[pgConnectionStateItem]
 	if !ok {
 		return
 	}
@@ -46,8 +73,10 @@ func (c *Client) SendConnectionStateAlert(connID, connName, endpoint, state stri
 	attrs := c.pgConnectionStateAttributes(connID, displayName, endpoint, state, priority, errCode)
 
 	c.sendAlert(
-		alertDef.Event,
+		alertDef.Item,
 		displayName,
+		c.sysID,
+		alertDef.Item,
 		severity,
 		alertDef.Group,
 		state,
@@ -63,7 +92,7 @@ func (c *Client) SendShutdownAlert(ctx context.Context, connID, connName, endpoi
 		return nil
 	}
 
-	alertDef, ok := c.alertMap[pgConnectionStateEvent]
+	alertDef, ok := c.alertMap[pgConnectionStateItem]
 	if !ok {
 		return nil
 	}
@@ -80,8 +109,10 @@ func (c *Client) SendShutdownAlert(ctx context.Context, connID, connName, endpoi
 
 	return c.sendAlertSync(
 		ctx,
-		alertDef.Event,
+		alertDef.Item,
 		displayName,
+		c.sysID,
+		alertDef.Item,
 		"critical",
 		alertDef.Group,
 		config.ConnStateDisconnected,
