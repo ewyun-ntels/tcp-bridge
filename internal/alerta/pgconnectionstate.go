@@ -46,7 +46,8 @@ func (c *Client) SendConnectionStateAlert(connID, endpoint, state string, priori
 
 	c.sendAlert(
 		alertDef.Event,
-		fmt.Sprintf("%s:%s", c.sysID, connID),
+		connID,
+		//fmt.Sprintf("%s:%s", c.sysID, connID),
 		severity,
 		alertDef.Group,
 		state,
