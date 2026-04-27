@@ -101,8 +101,8 @@ type TCPReplyInfo struct {
 func NewInflightManager(logger *slog.Logger) *InflightManager {
 	return &InflightManager{
 		logger:    logger,
-		inflightA: NewInflightA(logger.With("component", "inflight-natsinbound")),
-		inflightB: NewInflightB(logger.With("component", "inflight-tcpinbound")),
+		inflightA: NewInflightA(logger.With("component", "inflight-outbound")),
+		inflightB: NewInflightB(logger.With("component", "inflight-inbound")),
 	}
 }
 
